@@ -214,8 +214,15 @@ body { padding-top: 56px !important; }
   backdrop-filter: saturate(1.2) blur(6px);
 }
 #cdv-brand { font-weight: 600; opacity: 0.9; margin-right: 8px; }
-#cdv-search-host { flex: 1; min-width: 120px; display: flex; align-items: center; }
+#cdv-search-host { flex: 1; min-width: 120px; display: flex; align-items: center; position: relative; }
 #cdv-search-host rustdoc-search { width: 100%; }
+#cdv-search-history { position: absolute; top: 36px; left: 0; right: 0; background: var(--cdv-bg); color: var(--cdv-fg); border: 1px solid var(--cdv-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.35); max-height: 50vh; overflow: auto; display: none; z-index: 10000; }
+#cdv-search-history.open { display: block; }
+#cdv-search-history .cdv-hist-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--cdv-border); font-size: 12px; opacity: 0.9; }
+#cdv-hist-clear { background: transparent; border: 1px solid var(--cdv-border); color: var(--cdv-fg); border-radius: 4px; padding: 2px 6px; cursor: pointer; }
+#cdv-search-history .cdv-hist-item { padding: 6px 10px; cursor: pointer; }
+#cdv-search-history .cdv-hist-item:hover, #cdv-search-history .cdv-hist-item.active { background: rgba(255,255,255,0.08); }
+#cdv-search-history .cdv-hist-empty { padding: 8px 10px; opacity: 0.7; }
 #cdv-chat-toggle {
   height: 32px; padding: 0 10px; border: 1px solid var(--cdv-border);
   border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--cdv-fg);
@@ -328,6 +335,7 @@ const CDV_JS: &str = r#"
       document.body.appendChild(bar);
     }
     integrateRustdocSearch();
+    setupSearchHistory();
 
     // Chat panel
     if (!CDV_FLAGS.noChat && !document.getElementById('cdv-chat-panel')) {
@@ -441,6 +449,152 @@ const CDV_JS: &str = r#"
           if (existing && existing.parentElement !== host) host.appendChild(existing);
         } catch(_) {}
       }, 50);
+    }
+
+    function setupSearchHistory() {
+      try {
+        if (CDV_FLAGS.noTop) return;
+        var host = document.getElementById('cdv-search-host');
+        if (!host) return;
+        var dropdown = document.getElementById('cdv-search-history');
+        if (!dropdown) {
+          dropdown = document.createElement('div');
+          dropdown.id = 'cdv-search-history';
+          host.appendChild(dropdown);
+        }
+        var input = findRustdocSearchInput();
+        if (!input) { setTimeout(setupSearchHistory, 80); return; }
+
+        function render(list, activeIdx) {
+          var html = '';
+          html += '<div class="cdv-hist-header"><span>搜索历史</span><button id="cdv-hist-clear" title="清空历史">清空</button></div>';
+          if (!list || list.length === 0) {
+            html += '<div class="cdv-hist-empty">暂无历史</div>';
+          } else {
+            for (var i=0;i<list.length;i++) {
+              var cls = 'cdv-hist-item' + (i===activeIdx?' active':'');
+              html += '<div class="'+cls+'" data-idx="'+i+'">'+escapeHtml(list[i])+'</div>';
+            }
+          }
+          dropdown.innerHTML = html;
+          var btn = dropdown.querySelector('#cdv-hist-clear');
+          if (btn) btn.addEventListener('click', function(ev){ ev.preventDefault(); saveHistoryList([]); update(''); input.focus(); });
+          dropdown.querySelectorAll('.cdv-hist-item').forEach(function(el){
+            el.addEventListener('click', function(){ var i = +el.getAttribute('data-idx'); var list = loadHistoryList(); applyQuery(list[i]); });
+          });
+        }
+
+        function applyQuery(q) {
+          if (!input) return;
+          try {
+            input.focus();
+            input.value = q;
+            input.dispatchEvent(new Event('input', {bubbles:true}));
+            // Simulate Enter to trigger navigation if rustdoc expects it
+            input.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', code:'Enter', bubbles:true}));
+          } catch(_) {}
+          hide();
+        }
+
+        function update(filter) {
+          var list = loadHistoryList();
+          if (filter) {
+            var f = filter.toLowerCase();
+            list = list.filter(function(x){ return x.toLowerCase().indexOf(f) >= 0; });
+          }
+          render(list, -1);
+        }
+
+        function show() { dropdown.classList.add('open'); }
+        function hide() { dropdown.classList.remove('open'); }
+
+        var activeIdx = -1;
+        function move(delta) {
+          var items = dropdown.querySelectorAll('.cdv-hist-item');
+          if (!items.length) return;
+          activeIdx = (activeIdx + delta + items.length) % items.length;
+          items.forEach(function(el, idx){ el.classList.toggle('active', idx===activeIdx); });
+        }
+
+        input.addEventListener('focus', function(){
+          if (!input.value) { update(''); show(); }
+        });
+        input.addEventListener('input', function(){
+          if (!input.value) { update(''); show(); }
+          else { update(input.value); show(); }
+        });
+        input.addEventListener('keydown', function(ev){
+          if (ev.key === 'ArrowDown') { ev.preventDefault(); move(1); return; }
+          if (ev.key === 'ArrowUp') { ev.preventDefault(); move(-1); return; }
+          if (ev.key === 'Enter') {
+            var items = dropdown.querySelectorAll('.cdv-hist-item');
+            if (activeIdx >= 0 && activeIdx < items.length) {
+              ev.preventDefault();
+              var i = +items[activeIdx].getAttribute('data-idx');
+              var list = loadHistoryList();
+              applyQuery(list[i]);
+              return;
+            }
+            // Save current query to history
+            var q = (input.value || '').trim();
+            if (q) saveHistory(q);
+            hide();
+          }
+          if (ev.key === 'Escape') { hide(); }
+        });
+
+        document.addEventListener('click', function(ev){
+          if (!dropdown.contains(ev.target) && ev.target !== input) hide();
+        });
+
+        // Initial render
+        update('');
+      } catch(_) {}
+    }
+
+    function findRustdocSearchInput() {
+      try {
+        var rs = document.querySelector('rustdoc-search');
+        if (!rs) return null;
+        var root = rs.shadowRoot || rs;
+        var input = root.querySelector('input[type="search"], input');
+        return input || null;
+      } catch(_) { return null; }
+    }
+
+    function cdvHistoryKey() {
+      try {
+        var meta = document.querySelector('meta[name="rustdoc-vars"]');
+        var rootPath = (meta && meta.dataset && meta.dataset.rootPath) || './';
+        var crate = (meta && meta.dataset && meta.dataset.currentCrate) || '';
+        var base = new URL(rootPath, location.href);
+        return 'cdv.search.history::' + base.pathname + '::' + crate;
+      } catch(_) { return 'cdv.search.history::' + location.pathname; }
+    }
+
+    function loadHistoryList() {
+      try {
+        var raw = localStorage.getItem(cdvHistoryKey());
+        if (!raw) return [];
+        var arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; return [];
+      } catch(_) { return []; }
+    }
+
+    function saveHistoryList(list) {
+      try { localStorage.setItem(cdvHistoryKey(), JSON.stringify(list)); } catch(_) {}
+    }
+
+    function saveHistory(q) {
+      var list = loadHistoryList();
+      var idx = list.indexOf(q);
+      if (idx >= 0) list.splice(idx, 1);
+      list.unshift(q);
+      if (list.length > 20) list = list.slice(0, 20);
+      saveHistoryList(list);
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'})[c]; });
     }
 
     // Build symbols list with categories

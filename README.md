@@ -22,6 +22,10 @@ Features
   - 章节 (fallback to headings h2/h3/h4)
 - LLM chat button in the top bar that toggles a right-side chat panel. The current implementation performs a simple retrieval over the page contents to surface relevant snippets (no network calls). You can wire it to a real backend later.
 
+Search enhancements
+- The top bar embeds rustdoc’s native search component for full parity.
+- Search history: remembers your recent queries per docs root and crate (localStorage), shows a dropdown when focusing the search; supports arrow navigation, Enter to apply, and clear-all.
+
 Usage
 1. Generate docs as usual:
    - `cargo doc` (or `RUSTDOCFLAGS` as you prefer)
