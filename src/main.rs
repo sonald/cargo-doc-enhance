@@ -214,16 +214,8 @@ body { padding-top: 56px !important; }
   backdrop-filter: saturate(1.2) blur(6px);
 }
 #cdv-brand { font-weight: 600; opacity: 0.9; margin-right: 8px; }
-#cdv-search-host { flex: 1; min-width: 120px; display: flex; align-items: center; position: relative; gap: 6px; }
-#cdv-search-input { flex: 1; height: 32px; border-radius: 6px; border: 1px solid var(--cdv-border); background: rgba(255,255,255,0.06); color: var(--cdv-fg); padding: 0 10px; outline: none; }
-#cdv-search-input::placeholder { color: rgba(230,230,230,0.55); }
-#cdv-search-history { position: absolute; top: 36px; left: 0; right: 0; background: var(--cdv-bg); color: var(--cdv-fg); border: 1px solid var(--cdv-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.35); max-height: 50vh; overflow: auto; display: none; z-index: 10000; }
-#cdv-search-history.open { display: block; }
-#cdv-search-history .cdv-hist-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--cdv-border); font-size: 12px; opacity: 0.9; }
-#cdv-hist-clear { background: transparent; border: 1px solid var(--cdv-border); color: var(--cdv-fg); border-radius: 4px; padding: 2px 6px; cursor: pointer; }
-#cdv-search-history .cdv-hist-item { padding: 6px 10px; cursor: pointer; }
-#cdv-search-history .cdv-hist-item:hover, #cdv-search-history .cdv-hist-item.active { background: rgba(255,255,255,0.08); }
-#cdv-search-history .cdv-hist-empty { padding: 8px 10px; opacity: 0.7; }
+#cdv-search-host { flex: 1; min-width: 120px; display: flex; align-items: center; position: relative; }
+#cdv-search-host rustdoc-search { width: 100%; }
 #cdv-chat-toggle {
   height: 32px; padding: 0 10px; border: 1px solid var(--cdv-border);
   border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--cdv-fg);
@@ -250,10 +242,9 @@ body { padding-top: 56px !important; }
 
 /* Left symbols list inside existing sidebar (non-destructive) */
 .cdv-symbols-bottom { max-height: 35vh; min-height: 140px; border-top: 1px solid var(--cdv-border); overflow: auto; background: rgba(255,255,255,0.03); }
-#cdv-symbols { padding: 8px; }
-#cdv-symbols b { display: block; margin-bottom: 6px; font-size: 12px; opacity: 0.8; }
-#cdv-symbols a { display: block; color: var(--cdv-fg); text-decoration: none; padding: 4px 6px; border-radius: 4px; }
-#cdv-symbols a:hover { background: rgba(255,255,255,0.08); }
+#cdv-fn-wrap { padding: 8px; }
+#cdv-fn-label { display: block; margin-bottom: 6px; font-size: 12px; opacity: 0.8; }
+#cdv-fn-select { width: 100%; height: 32px; border-radius: 6px; border: 1px solid var(--cdv-border); background: rgba(255,255,255,0.06); color: var(--cdv-fg); }
 
 /* Fallback overlay for symbols list if no sidebar detected */
 #cdv-symbols-overlay {
@@ -331,12 +322,11 @@ const CDV_JS: &str = r#"
       var bar = document.createElement('div');
       bar.id = 'cdv-topbar';
       bar.innerHTML = '<span id="cdv-brand">Doc+ Viewer</span>' +
-        '<div id="cdv-search-host"><input id="cdv-search-input" type="search" placeholder="搜索 (Enter)…" /></div>' +
+        '<div id="cdv-search-host"></div>' +
         '<button id="cdv-chat-toggle" title="Ask AI about this page">AI Chat</button>';
       document.body.appendChild(bar);
     }
     integrateRustdocSearch();
-    setupSearchHistory();
 
     // Chat panel
     if (!CDV_FLAGS.noChat && !document.getElementById('cdv-chat-panel')) {
@@ -360,24 +350,7 @@ const CDV_JS: &str = r#"
       });
     }
 
-    // Search handling on our input: proxy to rustdoc's search behavior
-    (function setupTopSearch(){
-      if (CDV_FLAGS.noTop) return;
-      var input = document.getElementById('cdv-search-input');
-      if (!input) return;
-      input.addEventListener('keydown', function(ev){
-        if (ev.key === 'Enter') {
-          var q = (input.value || '').trim();
-          if (!q) return;
-          saveHistory(q);
-          if (!tryRustdocSearchRedirect(q)) {
-            if (!tryProxyIntoExistingSearch(q)) {
-              pageFindFallback(q);
-            }
-          }
-        }
-      });
-    })();
+    // We embed rustdoc's own search component inside the top bar
 
     function tryRustdocSearchRedirect(q) {
       // Attempt to find a link to search.html to compute root
@@ -816,13 +789,67 @@ const CDV_JS: &str = r#"
       }
     }
 
+    // Build a compact function selector in the sidebar
+    function buildFnSelect(into) {
+      var items = collectFunctions();
+      var wrap = document.createElement('div');
+      wrap.id = 'cdv-fn-wrap';
+      var label = document.createElement('span');
+      label.id = 'cdv-fn-label';
+      label.textContent = '本页函数';
+      wrap.appendChild(label);
+      var sel = document.createElement('select');
+      sel.id = 'cdv-fn-select';
+      var opts = '<option value="">选择函数…</option>';
+      items.forEach(function(it){ opts += '<option value="'+it.href+'">'+it.title+'</option>'; });
+      sel.innerHTML = opts;
+      sel.addEventListener('change', function(){
+        var v = sel.value; if (!v) return;
+        try {
+          var id = v.replace(/^#/, '');
+          var el = document.getElementById(id);
+          if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+          location.hash = v;
+        } catch(_) {}
+      });
+      into.innerHTML = '';
+      into.appendChild(wrap);
+      wrap.appendChild(sel);
+      if (items.length === 0) {
+        label.textContent = '未找到本页函数';
+        sel.style.display = 'none';
+      }
+    }
+
+    function collectFunctions() {
+      var picks = [];
+      var seen = new Set();
+      var rules = ['method.', 'tymethod.', 'associatedfunction.', 'function.', 'fn.'];
+      var nodes = Array.prototype.slice.call(document.querySelectorAll('[id]'));
+      nodes.forEach(function(n){
+        var id = n.id || ''; if (!id) return; var idLower = id.toLowerCase();
+        for (var i=0;i<rules.length;i++) {
+          var pref = rules[i];
+          if (idLower.indexOf(pref) === 0) {
+            if (!seen.has(id)) {
+              picks.push({href:'#'+id, title: deriveTitleFromId(id, pref)});
+              seen.add(id);
+            }
+            return;
+          }
+        }
+      });
+      picks.sort(function(a,b){ return a.title.localeCompare(b.title); });
+      return picks;
+    }
+
     // Throttled rebuild helper to avoid infinite MutationObserver loops
     function installThrottledRebuilder(into) {
       var scheduled = false;
       function schedule() {
         if (scheduled) return;
         scheduled = true;
-        setTimeout(function(){ scheduled = false; try { buildSymbols(into); } catch(_){} }, 120);
+        setTimeout(function(){ scheduled = false; try { buildFnSelect(into); } catch(_){} }, 120);
       }
       window.addEventListener('hashchange', schedule);
       try {
@@ -850,14 +877,14 @@ const CDV_JS: &str = r#"
           if (!bottom) {
             bottom = document.createElement('div');
             bottom.className = 'cdv-symbols-bottom';
-            bottom.innerHTML = '<div id="cdv-symbols"></div>';
+            bottom.innerHTML = '<div id="cdv-fns"></div>';
             side.appendChild(bottom);
           }
-          var into = bottom.querySelector('#cdv-symbols');
-          if (into) buildSymbols(into);
+          var into = bottom.querySelector('#cdv-fns');
+          if (into) buildFnSelect(into);
           // Rebuild when hash changes or DOM updates (throttled, ignore our own updates)
           installThrottledRebuilder(into);
-          setTimeout(function(){ buildSymbols(into); }, 300);
+          setTimeout(function(){ buildFnSelect(into); }, 300);
           return;
         }
       }
@@ -865,12 +892,12 @@ const CDV_JS: &str = r#"
       if (!document.getElementById('cdv-symbols-overlay')) {
         var ov = document.createElement('div');
         ov.id = 'cdv-symbols-overlay';
-        ov.innerHTML = '<div id="cdv-symbols-overlay-header">Symbols</div><div id="cdv-symbols-overlay-body"><div id="cdv-symbols"></div></div>';
+        ov.innerHTML = '<div id="cdv-symbols-overlay-header">Symbols</div><div id="cdv-symbols-overlay-body"><div id="cdv-fns"></div></div>';
         document.body.appendChild(ov);
-        var into = ov.querySelector('#cdv-symbols');
-        if (into) buildSymbols(into);
+        var into = ov.querySelector('#cdv-fns');
+        if (into) buildFnSelect(into);
         installThrottledRebuilder(into);
-        setTimeout(function(){ buildSymbols(into); }, 300);
+        setTimeout(function(){ buildFnSelect(into); }, 300);
       }
     })();
 
