@@ -327,6 +327,7 @@ const CDV_JS: &str = r#"
       document.body.appendChild(bar);
     }
     integrateRustdocSearch();
+    setupFnDropdownTop();
 
     // Chat panel
     if (!CDV_FLAGS.noChat && !document.getElementById('cdv-chat-panel')) {
@@ -843,6 +844,53 @@ const CDV_JS: &str = r#"
       return picks;
     }
 
+    // Build a compact function selector near the top search
+    function setupFnDropdownTop() {
+      try {
+        if (CDV_FLAGS.noTop) return;
+        var host = document.getElementById('cdv-search-host');
+        if (!host) return;
+        var sel = document.getElementById('cdv-fn-select-top');
+        if (!sel) {
+          sel = document.createElement('select');
+          sel.id = 'cdv-fn-select-top';
+          host.appendChild(sel);
+          sel.addEventListener('change', function(){
+            var v = sel.value; if (!v) return;
+            try {
+              var id = v.replace(/^#/, '');
+              var el = document.getElementById(id);
+              if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+              location.hash = v;
+            } catch(_) {}
+          });
+        }
+        rebuildFnDropdownTop();
+        installThrottledTopRebuilder();
+      } catch(_) {}
+    }
+
+    function rebuildFnDropdownTop() {
+      var sel = document.getElementById('cdv-fn-select-top');
+      if (!sel) return;
+      var items = collectFunctions();
+      var opts = '<option value="">本页函数…</option>';
+      items.forEach(function(it){ opts += '<option value="'+it.href+'">'+it.title+'</option>'; });
+      sel.innerHTML = opts;
+      sel.disabled = (items.length === 0);
+    }
+
+    function installThrottledTopRebuilder() {
+      var scheduled = false;
+      function schedule(){ if (scheduled) return; scheduled = true; setTimeout(function(){ scheduled=false; rebuildFnDropdownTop(); }, 120); }
+      window.addEventListener('hashchange', schedule);
+      try {
+        var mo = new MutationObserver(function(){ schedule(); });
+        mo.observe(document.body, {subtree:true, childList:true});
+      } catch(_) {}
+      window.addEventListener('load', schedule);
+    }
+
     // Throttled rebuild helper to avoid infinite MutationObserver loops
     function installThrottledRebuilder(into) {
       var scheduled = false;
@@ -866,40 +914,8 @@ const CDV_JS: &str = r#"
       window.addEventListener('load', schedule);
     }
 
-    // Try to enhance the existing sidebar (non-destructive)
-    (function setupSidebarSymbols(){
-      if (CDV_FLAGS.noSymbols) return;
-      var side = document.querySelector('nav.sidebar, .sidebar, #sidebar');
-      if (side) {
-        if (!side.classList.contains('cdv-sidebar-ready')) {
-          side.classList.add('cdv-sidebar-ready');
-          var bottom = side.querySelector('.cdv-symbols-bottom');
-          if (!bottom) {
-            bottom = document.createElement('div');
-            bottom.className = 'cdv-symbols-bottom';
-            bottom.innerHTML = '<div id="cdv-fns"></div>';
-            side.appendChild(bottom);
-          }
-          var into = bottom.querySelector('#cdv-fns');
-          if (into) buildFnSelect(into);
-          // Rebuild when hash changes or DOM updates (throttled, ignore our own updates)
-          installThrottledRebuilder(into);
-          setTimeout(function(){ buildFnSelect(into); }, 300);
-          return;
-        }
-      }
-      // Fallback overlay
-      if (!document.getElementById('cdv-symbols-overlay')) {
-        var ov = document.createElement('div');
-        ov.id = 'cdv-symbols-overlay';
-        ov.innerHTML = '<div id="cdv-symbols-overlay-header">Symbols</div><div id="cdv-symbols-overlay-body"><div id="cdv-fns"></div></div>';
-        document.body.appendChild(ov);
-        var into = ov.querySelector('#cdv-fns');
-        if (into) buildFnSelect(into);
-        installThrottledRebuilder(into);
-        setTimeout(function(){ buildFnSelect(into); }, 300);
-      }
-    })();
+    // Sidebar injection is disabled; function dropdown moved next to top search
+    (function setupSidebarSymbols(){ return; })();
 
     // Chat: simple retrieval over page content
     (function setupChat(){
