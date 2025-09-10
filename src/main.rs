@@ -214,8 +214,9 @@ body { padding-top: 56px !important; }
   backdrop-filter: saturate(1.2) blur(6px);
 }
 #cdv-brand { font-weight: 600; opacity: 0.9; margin-right: 8px; }
-#cdv-search-host { flex: 1; min-width: 120px; display: flex; align-items: center; position: relative; }
+#cdv-search-host { flex: 1; min-width: 120px; display: flex; align-items: center; position: relative; gap: 8px; }
 #cdv-search-host rustdoc-search { width: 100%; }
+#cdv-fn-select-top { height: 32px; border-radius: 6px; border: 1px solid var(--cdv-border); background: rgba(255,255,255,0.06); color: var(--cdv-fg); padding: 0 6px; }
 #cdv-chat-toggle {
   height: 32px; padding: 0 10px; border: 1px solid var(--cdv-border);
   border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--cdv-fg);
@@ -810,7 +811,9 @@ const CDV_JS: &str = r#"
           var id = v.replace(/^#/, '');
           var el = document.getElementById(id);
           if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
-          location.hash = v;
+          if (location.hash !== v) {
+            try { history.replaceState(null, '', v); } catch(_) { location.hash = v; }
+          }
         } catch(_) {}
       });
       into.innerHTML = '';
@@ -882,10 +885,18 @@ const CDV_JS: &str = r#"
 
     function installThrottledTopRebuilder() {
       var scheduled = false;
+      var host = document.getElementById('cdv-search-host');
+      var topbar = document.getElementById('cdv-topbar');
       function schedule(){ if (scheduled) return; scheduled = true; setTimeout(function(){ scheduled=false; rebuildFnDropdownTop(); }, 120); }
       window.addEventListener('hashchange', schedule);
       try {
-        var mo = new MutationObserver(function(){ schedule(); });
+        var mo = new MutationObserver(function(muts){
+          for (var i=0;i<muts.length;i++) {
+            var t = muts[i].target;
+            if ((host && host.contains(t)) || (topbar && topbar.contains(t))) return; // ignore our own UI changes
+          }
+          schedule();
+        });
         mo.observe(document.body, {subtree:true, childList:true});
       } catch(_) {}
       window.addEventListener('load', schedule);
