@@ -214,8 +214,9 @@ body { padding-top: 56px !important; }
   backdrop-filter: saturate(1.2) blur(6px);
 }
 #cdv-brand { font-weight: 600; opacity: 0.9; margin-right: 8px; }
-#cdv-search-host { flex: 1; min-width: 120px; display: flex; align-items: center; position: relative; }
-#cdv-search-host rustdoc-search { width: 100%; }
+#cdv-search-host { flex: 1; min-width: 120px; display: flex; align-items: center; position: relative; gap: 6px; }
+#cdv-search-input { flex: 1; height: 32px; border-radius: 6px; border: 1px solid var(--cdv-border); background: rgba(255,255,255,0.06); color: var(--cdv-fg); padding: 0 10px; outline: none; }
+#cdv-search-input::placeholder { color: rgba(230,230,230,0.55); }
 #cdv-search-history { position: absolute; top: 36px; left: 0; right: 0; background: var(--cdv-bg); color: var(--cdv-fg); border: 1px solid var(--cdv-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.35); max-height: 50vh; overflow: auto; display: none; z-index: 10000; }
 #cdv-search-history.open { display: block; }
 #cdv-search-history .cdv-hist-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--cdv-border); font-size: 12px; opacity: 0.9; }
@@ -330,7 +331,7 @@ const CDV_JS: &str = r#"
       var bar = document.createElement('div');
       bar.id = 'cdv-topbar';
       bar.innerHTML = '<span id="cdv-brand">Doc+ Viewer</span>' +
-        '<div id="cdv-search-host"></div>' +
+        '<div id="cdv-search-host"><input id="cdv-search-input" type="search" placeholder="搜索 (Enter)…" /></div>' +
         '<button id="cdv-chat-toggle" title="Ask AI about this page">AI Chat</button>';
       document.body.appendChild(bar);
     }
@@ -359,7 +360,24 @@ const CDV_JS: &str = r#"
       });
     }
 
-    // We embed the original rustdoc-search component; no separate input needed.
+    // Search handling on our input: proxy to rustdoc's search behavior
+    (function setupTopSearch(){
+      if (CDV_FLAGS.noTop) return;
+      var input = document.getElementById('cdv-search-input');
+      if (!input) return;
+      input.addEventListener('keydown', function(ev){
+        if (ev.key === 'Enter') {
+          var q = (input.value || '').trim();
+          if (!q) return;
+          saveHistory(q);
+          if (!tryRustdocSearchRedirect(q)) {
+            if (!tryProxyIntoExistingSearch(q)) {
+              pageFindFallback(q);
+            }
+          }
+        }
+      });
+    })();
 
     function tryRustdocSearchRedirect(q) {
       // Attempt to find a link to search.html to compute root
@@ -462,7 +480,7 @@ const CDV_JS: &str = r#"
           dropdown.id = 'cdv-search-history';
           host.appendChild(dropdown);
         }
-        var input = findRustdocSearchInput();
+        var input = document.getElementById('cdv-search-input');
         if (!input) { setTimeout(setupSearchHistory, 80); return; }
 
         function render(list, activeIdx) {
@@ -490,8 +508,13 @@ const CDV_JS: &str = r#"
             input.focus();
             input.value = q;
             input.dispatchEvent(new Event('input', {bubbles:true}));
-            // Simulate Enter to trigger navigation if rustdoc expects it
-            input.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', code:'Enter', bubbles:true}));
+            // Trigger search via same flow as Enter
+            saveHistory(q);
+            if (!tryRustdocSearchRedirect(q)) {
+              if (!tryProxyIntoExistingSearch(q)) {
+                pageFindFallback(q);
+              }
+            }
           } catch(_) {}
           hide();
         }
