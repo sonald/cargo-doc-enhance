@@ -217,6 +217,11 @@ body { padding-top: 56px !important; }
 #cdv-search-host { flex: 1; min-width: 120px; display: flex; align-items: center; position: relative; gap: 8px; }
 #cdv-search-host rustdoc-search { width: 100%; }
 #cdv-fn-select-top { height: 32px; border-radius: 6px; border: 1px solid var(--cdv-border); background: rgba(255,255,255,0.06); color: var(--cdv-fg); padding: 0 6px; }
+#cdv-home {
+  height: 32px; padding: 0 10px; border: 1px solid var(--cdv-border);
+  border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--cdv-fg);
+  cursor: pointer; margin-right: 6px;
+}
 #cdv-chat-toggle {
   height: 32px; padding: 0 10px; border: 1px solid var(--cdv-border);
   border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--cdv-fg);
@@ -323,12 +328,24 @@ const CDV_JS: &str = r#"
       var bar = document.createElement('div');
       bar.id = 'cdv-topbar';
       bar.innerHTML = '<span id="cdv-brand">Doc+ Viewer</span>' +
+        '<button id="cdv-home" title="返回文档起始页（Shift：返回当前crate首页）">Home</button>' +
         '<div id="cdv-search-host"></div>' +
         '<button id="cdv-chat-toggle" title="Ask AI about this page">AI Chat</button>';
       document.body.appendChild(bar);
     }
     integrateRustdocSearch();
     setupFnDropdownTop();
+
+    // Home navigation
+    (function setupHome(){
+      var btn = document.getElementById('cdv-home');
+      if (!btn) return;
+      btn.addEventListener('click', function(ev){
+        var target = buildDocsHomeUrl(ev && ev.shiftKey);
+        if (target) { window.location.href = target; }
+      });
+    })();
+    
 
     // Chat panel
     if (!CDV_FLAGS.noChat && !document.getElementById('cdv-chat-panel')) {
@@ -442,6 +459,19 @@ const CDV_JS: &str = r#"
           if (existing && existing.parentElement !== host) host.appendChild(existing);
         } catch(_) {}
       }, 50);
+    }
+
+    function buildDocsHomeUrl(toCrate) {
+      try {
+        var meta = document.querySelector('meta[name="rustdoc-vars"]');
+        var root = (meta && meta.dataset && meta.dataset.rootPath) || './';
+        var crate = (meta && meta.dataset && meta.dataset.currentCrate) || '';
+        var rel = toCrate && crate ? crate + '/index.html' : 'index.html';
+        var url = new URL(root + rel, location.href);
+        return url.href;
+      } catch(_) {
+        try { return new URL('index.html', location.href).href; } catch(_) { return null; }
+      }
     }
 
     function setupSearchHistory() {
