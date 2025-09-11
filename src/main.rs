@@ -227,6 +227,11 @@ body { padding-top: 56px !important; }
   border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--cdv-fg);
   cursor: pointer;
 }
+#cdv-focus-toggle {
+  height: 32px; padding: 0 10px; border: 1px solid var(--cdv-border);
+  border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--cdv-fg);
+  cursor: pointer;
+}
 
 /* Chat panel */
 #cdv-chat-panel {
@@ -261,6 +266,21 @@ body { padding-top: 56px !important; }
 }
 #cdv-symbols-overlay-header { padding: 8px 10px; border-bottom: 1px solid var(--cdv-border); font-weight: 600; }
 #cdv-symbols-overlay-body { height: calc(100% - 40px); overflow: auto; padding: 8px; }
+
+/* Heading anchor copy */
+.cdv-copy-anchor { margin-left: 8px; font-size: 12px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--cdv-border); background: rgba(255,255,255,0.06); color: var(--cdv-fg); cursor: pointer; opacity: 0.0; transition: opacity 0.15s; }
+h1:hover .cdv-copy-anchor, h2:hover .cdv-copy-anchor, h3:hover .cdv-copy-anchor, h4:hover .cdv-copy-anchor { opacity: 1.0; }
+.cdv-anchor-target { animation: cdvFlash 1.5s ease-out 1; }
+@keyframes cdvFlash { 0% { background: rgba(106,166,255,0.25); } 100% { background: transparent; } }
+
+/* Code copy */
+pre { position: relative; }
+.cdv-copy-code { position: absolute; top: 6px; right: 6px; font-size: 12px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--cdv-border); background: rgba(0,0,0,0.35); color: var(--cdv-fg); cursor: pointer; }
+
+/* Focus mode */
+.cdv-focus nav.sidebar { display: none !important; }
+.cdv-focus .sidebar-resizer { display: none !important; }
+.cdv-focus #cdv-chat-panel { display: none !important; }
 "#;
 
 const CDV_JS: &str = r#"
@@ -328,8 +348,9 @@ const CDV_JS: &str = r#"
       var bar = document.createElement('div');
       bar.id = 'cdv-topbar';
       bar.innerHTML = '<span id="cdv-brand">Doc+ Viewer</span>' +
-        '<button id="cdv-home" title="返回文档起始页（Shift：返回当前crate首页）">Home</button>' +
+        '<button id="cdv-home" title="返回当前 crate 首页">Home</button>' +
         '<div id="cdv-search-host"></div>' +
+        '<button id="cdv-focus-toggle" title="专注模式">Focus</button>' +
         '<button id="cdv-chat-toggle" title="Ask AI about this page">AI Chat</button>';
       document.body.appendChild(bar);
     }
@@ -343,6 +364,19 @@ const CDV_JS: &str = r#"
       btn.addEventListener('click', function(ev){
         var target = buildDocsHomeUrl(ev && ev.shiftKey);
         if (target) { window.location.href = target; }
+      });
+    })();
+
+    // Focus mode toggle
+    (function setupFocus(){
+      var btn = document.getElementById('cdv-focus-toggle');
+      if (!btn) return;
+      var key = 'cdv.focus';
+      function apply(v){ document.documentElement.classList.toggle('cdv-focus', !!v); }
+      try { apply(localStorage.getItem(key)==='1'); } catch(_) {}
+      btn.addEventListener('click', function(){
+        var v = !document.documentElement.classList.contains('cdv-focus');
+        apply(v); try { localStorage.setItem(key, v?'1':'0'); } catch(_) {}
       });
     })();
     
@@ -466,13 +500,103 @@ const CDV_JS: &str = r#"
         var meta = document.querySelector('meta[name="rustdoc-vars"]');
         var root = (meta && meta.dataset && meta.dataset.rootPath) || './';
         var crate = (meta && meta.dataset && meta.dataset.currentCrate) || '';
-        var rel = toCrate && crate ? crate + '/index.html' : 'index.html';
+        // Prefer current crate index as "home" to avoid missing root index.html
+        var primary = crate ? crate + '/index.html' : 'index.html';
+        var fallback = 'index.html';
+        var rel = toCrate ? primary : primary; // both default to crate index
         var url = new URL(root + rel, location.href);
         return url.href;
       } catch(_) {
         try { return new URL('index.html', location.href).href; } catch(_) { return null; }
       }
     }
+
+    // Add copy buttons to headings and highlight anchor targets
+    (function setupAnchorsAndCopy(){
+      try {
+        var main = document.querySelector('main') || document.body;
+        var hs = main.querySelectorAll('h1[id], h2[id], h3[id], h4[id]');
+        hs.forEach(function(h){
+          if (h.querySelector('.cdv-copy-anchor')) return;
+          var id = h.getAttribute('id'); if (!id) return;
+          var btn = document.createElement('button');
+          btn.className = 'cdv-copy-anchor';
+          btn.textContent = '复制链接';
+          btn.addEventListener('click', function(ev){ ev.preventDefault(); ev.stopPropagation(); copyAnchor(id); });
+          h.appendChild(btn);
+        });
+        if (location.hash) markAnchorTarget(location.hash.slice(1));
+        window.addEventListener('hashchange', function(){ markAnchorTarget(location.hash.slice(1)); });
+      } catch(_) {}
+      function copyAnchor(id){
+        try {
+          var url = new URL('#'+id, location.href).href;
+          navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(url) : document.execCommand('copy');
+        } catch(_) {}
+      }
+      function markAnchorTarget(id){
+        try {
+          var el = document.getElementById(id); if (!el) return;
+          el.classList.add('cdv-anchor-target');
+          setTimeout(function(){ el.classList.remove('cdv-anchor-target'); }, 1500);
+        } catch(_) {}
+      }
+    })();
+
+    // Add copy buttons to code blocks
+    (function setupCodeCopy(){
+      try {
+        var blocks = document.querySelectorAll('pre > code');
+        blocks.forEach(function(code){
+          var pre = code.parentElement; if (!pre) return;
+          if (pre.querySelector('.cdv-copy-code')) return;
+          var btn = document.createElement('button');
+          btn.className = 'cdv-copy-code';
+          btn.textContent = '复制';
+          btn.addEventListener('click', function(ev){ ev.preventDefault(); ev.stopPropagation();
+            var text = code.innerText || code.textContent || '';
+            try { navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text) : document.execCommand('copy'); } catch(_) {}
+          });
+          pre.appendChild(btn);
+        });
+      } catch(_) {}
+    })();
+
+    // Restore scroll position when returning, unless on a hash
+    (function setupScrollMemory(){
+      try {
+        var key = 'cdv.scroll::' + location.pathname;
+        if (!location.hash) {
+          var y = parseInt(sessionStorage.getItem(key) || '0', 10);
+          if (y > 0) setTimeout(function(){ window.scrollTo(0, y); }, 0);
+        }
+        var scheduled = false;
+        window.addEventListener('scroll', function(){
+          if (scheduled) return; scheduled=true;
+          setTimeout(function(){ scheduled=false; try { sessionStorage.setItem(key, String(window.scrollY||window.pageYOffset||0)); } catch(_){} }, 200);
+        });
+      } catch(_) {}
+    })();
+
+    // Keyboard: previous/next section by headings
+    (function setupHeadingNav(){
+      function isTypingTarget(e){ var t = e.target; var n = (t && t.tagName||'').toLowerCase(); return n==='input'||n==='textarea'||t.isContentEditable; }
+      function list(){ var m = document.querySelector('main')||document.body; return Array.prototype.slice.call(m.querySelectorAll('h2[id],h3[id],h4[id]')); }
+      document.addEventListener('keydown', function(ev){
+        if (isTypingTarget(ev)) return;
+        if (ev.key === '[' || ev.key === ']') {
+          var L = list(); if (!L.length) return;
+          var curr = location.hash ? document.getElementById(location.hash.slice(1)) : null;
+          var idx = curr ? L.indexOf(curr) : -1;
+          if (ev.key === '[') idx = Math.max(0, idx-1); else idx = Math.min(L.length-1, idx+1);
+          var target = L[idx]; if (!target) return;
+          target.scrollIntoView({behavior:'smooth', block:'start'});
+          var h = '#' + target.getAttribute('id');
+          try { history.replaceState(null,'',h); } catch(_) { location.hash = h; }
+          ev.preventDefault();
+        }
+      });
+    })();
 
     function setupSearchHistory() {
       try {
