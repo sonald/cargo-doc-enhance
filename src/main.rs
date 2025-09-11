@@ -232,6 +232,22 @@ body { padding-top: 56px !important; }
   border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--cdv-fg);
   cursor: pointer;
 }
+#cdv-filter-btn {
+  height: 32px; padding: 0 10px; border: 1px solid var(--cdv-border);
+  border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--cdv-fg);
+  cursor: pointer;
+}
+#cdv-filter-popover {
+  position: absolute; top: 40px; right: 12px; width: 280px; z-index: 10001;
+  background: var(--cdv-bg); color: var(--cdv-fg); border: 1px solid var(--cdv-border);
+  border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.35); display: none;
+}
+#cdv-filter-popover.open { display: block; }
+#cdv-filter-popover header { padding: 8px 10px; border-bottom: 1px solid var(--cdv-border); font-weight: 600; }
+#cdv-filter-popover .body { padding: 8px 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+#cdv-filter-popover footer { padding: 8px 10px; border-top: 1px solid var(--cdv-border); text-align: right; }
+#cdv-filter-popover label { user-select: none; }
+#cdv-filter-popover button { height: 28px; padding: 0 8px; border: 1px solid var(--cdv-border); border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--cdv-fg); cursor: pointer; }
 
 /* Chat panel */
 #cdv-chat-panel {
@@ -350,6 +366,7 @@ const CDV_JS: &str = r#"
       bar.innerHTML = '<span id="cdv-brand">Doc+ Viewer</span>' +
         '<button id="cdv-home" title="返回当前 crate 首页">Home</button>' +
         '<div id="cdv-search-host"></div>' +
+        '<button id="cdv-filter-btn" title="筛选搜索结果">Filter</button>' +
         '<button id="cdv-focus-toggle" title="专注模式">Focus</button>' +
         '<button id="cdv-chat-toggle" title="Ask AI about this page">AI Chat</button>';
       document.body.appendChild(bar);
@@ -378,6 +395,70 @@ const CDV_JS: &str = r#"
         var v = !document.documentElement.classList.contains('cdv-focus');
         apply(v); try { localStorage.setItem(key, v?'1':'0'); } catch(_) {}
       });
+    })();
+
+    // Search result filters
+    (function setupSearchFilter(){
+      try {
+        var btn = document.getElementById('cdv-filter-btn');
+        if (!btn) return;
+        var host = document.getElementById('cdv-search-host');
+        var pop = document.getElementById('cdv-filter-popover');
+        if (!pop) {
+          pop = document.createElement('div');
+          pop.id = 'cdv-filter-popover';
+          pop.innerHTML = ''+
+            '<header>结果筛选</header>'+
+            '<div class="body">'+
+              '<label><input type="checkbox" data-k="method" checked> 方法</label>'+
+              '<label><input type="checkbox" data-k="fn" checked> 函数</label>'+
+              '<label><input type="checkbox" data-k="struct" checked> 结构体</label>'+
+              '<label><input type="checkbox" data-k="enum" checked> 枚举</label>'+
+              '<label><input type="checkbox" data-k="trait" checked> Trait</label>'+
+              '<label><input type="checkbox" data-k="macro" checked> 宏</label>'+
+              '<label><input type="checkbox" data-k="const" checked> 常量</label>'+
+              '<label><input type="checkbox" data-k="type" checked> 类型</label>'+
+              '<label><input type="checkbox" data-k="mod" checked> 模块</label>'+
+            '</div>'+
+            '<footer>'+
+              '<button id="cdv-filter-all">全选</button> '+
+              '<button id="cdv-filter-none">清空</button>'+ 
+            '</footer>';
+          host.appendChild(pop);
+        }
+        var key = cdvFilterKey();
+        function load() {
+          try { var raw = localStorage.getItem(key); if (!raw) return null; return JSON.parse(raw); } catch(_) { return null; }
+        }
+        function save(state) {
+          try { localStorage.setItem(key, JSON.stringify(state)); } catch(_) {}
+        }
+        function readState() {
+          var s = {};
+          pop.querySelectorAll('input[type="checkbox"]').forEach(function(cb){ s[cb.getAttribute('data-k')] = cb.checked; });
+          return s;
+        }
+        function writeState(s) {
+          pop.querySelectorAll('input[type="checkbox"]').forEach(function(cb){ var k = cb.getAttribute('data-k'); cb.checked = s[k] !== false; });
+        }
+        function apply() {
+          var s = readState();
+          save(s);
+          applyResultFilter(s);
+        }
+        var saved = load(); if (saved) writeState(saved);
+        pop.addEventListener('change', function(ev){ if (ev.target && ev.target.matches('input[type="checkbox"]')) apply(); });
+        var btnAll = pop.querySelector('#cdv-filter-all');
+        var btnNone = pop.querySelector('#cdv-filter-none');
+        if (btnAll) btnAll.addEventListener('click', function(){ pop.querySelectorAll('input[type="checkbox"]').forEach(function(cb){ cb.checked = true; }); apply(); });
+        if (btnNone) btnNone.addEventListener('click', function(){ pop.querySelectorAll('input[type="checkbox"]').forEach(function(cb){ cb.checked = false; }); apply(); });
+        btn.addEventListener('click', function(ev){ ev.preventDefault(); ev.stopPropagation(); pop.classList.toggle('open'); });
+        document.addEventListener('click', function(ev){ if (!pop.contains(ev.target) && ev.target !== btn) pop.classList.remove('open'); });
+        // Observe search results
+        installSearchResultsObserver(function(){ var s = load() || readState(); applyResultFilter(s); });
+        // Initial attempt
+        setTimeout(function(){ var s = load() || readState(); applyResultFilter(s); }, 300);
+      } catch(_) {}
     })();
     
 
@@ -509,6 +590,58 @@ const CDV_JS: &str = r#"
       } catch(_) {
         try { return new URL('index.html', location.href).href; } catch(_) { return null; }
       }
+    }
+
+    function cdvFilterKey() {
+      try {
+        var meta = document.querySelector('meta[name="rustdoc-vars"]');
+        var root = (meta && meta.dataset && meta.dataset.rootPath) || './';
+        var base = new URL(root, location.href);
+        return 'cdv.search.filter::' + base.pathname;
+      } catch(_) { return 'cdv.search.filter::' + location.pathname; }
+    }
+
+    function installSearchResultsObserver(cb) {
+      try {
+        var rs = document.querySelector('rustdoc-search'); if (!rs) return;
+        var root = rs.shadowRoot || rs;
+        var target = root; // observe entire component
+        var mo = new MutationObserver(function(){ try { cb(); } catch(_) {} });
+        mo.observe(target, {subtree:true, childList:true});
+      } catch(_) {}
+    }
+
+    function applyResultFilter(state) {
+      try {
+        var rs = document.querySelector('rustdoc-search'); if (!rs) return;
+        var root = rs.shadowRoot || rs;
+        var anchors = root.querySelectorAll('a[href]');
+        anchors.forEach(function(a){
+          var href = a.getAttribute('href')||'';
+          var kind = kindFromHref(href);
+          var ok = !!state[kind];
+          var li = a.closest('li') || a.parentElement;
+          if (li) li.style.display = ok ? '' : 'none';
+        });
+      } catch(_) {}
+    }
+
+    function kindFromHref(href) {
+      try {
+        var u = new URL(href, location.href);
+        var p = u.pathname.toLowerCase();
+        var h = (u.hash||'').toLowerCase();
+        if (/\/fn\./.test(p)) return 'fn';
+        if (/\/struct\./.test(p)) return 'struct';
+        if (/\/enum\./.test(p)) return 'enum';
+        if (/\/trait\./.test(p)) return 'trait';
+        if (/\/macro\./.test(p)) return 'macro';
+        if (/\/constant\./.test(p)) return 'const';
+        if (/\/type\./.test(p)) return 'type';
+        if (/\/mod\./.test(p)) return 'mod';
+        if (/#(method\.|tymethod\.|associatedfunction\.)/.test(h)) return 'method';
+        return 'fn'; // default bucket
+      } catch(_) { return 'fn'; }
     }
 
     // Add copy buttons to headings and highlight anchor targets
