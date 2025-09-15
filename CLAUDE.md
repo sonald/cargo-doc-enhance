@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-cargo-doc-viewer is a Rust CLI tool that enhances `cargo doc` HTML output by injecting interactive UI components directly into generated HTML files. It uses only the Rust standard library plus the `bytes` crate for offline builds.
+cargo-doc-viewer is a Rust CLI tool that enhances `cargo doc` HTML output by injecting interactive UI components directly into generated HTML files. The entire application is contained in a single `main.rs` file (~1700 lines) that uses primarily the Rust standard library plus the `bytes` crate for efficient string handling.
 
 ## Development Commands
 
@@ -28,7 +28,7 @@ cargo-doc-viewer is a Rust CLI tool that enhances `cargo doc` HTML output by inj
 ### Core Design Principles
 - **Post-processing approach**: Modifies existing rustdoc HTML in-place rather than serving custom content
 - **Idempotent injection**: Uses `<!-- CDV: injected -->` markers to safely run multiple times
-- **No external dependencies**: Uses only Rust std + bytes crate for reliability
+- **Minimal dependencies**: Uses primarily Rust std + bytes crate for reliability and offline builds
 - **File-based operation**: No servers, works with static HTML files
 
 ### Main Components
@@ -56,9 +56,8 @@ The injected JavaScript creates several independent systems:
 ## File Structure
 
 - `src/main.rs`: Complete application in single file
-- `Cargo.toml`: Minimal dependencies (just `bytes = "1.10.1"`)
-- `knowledge.md`: Additional project documentation
-- `codebuff.json`: Development environment configuration
+- `Cargo.toml`: Minimal dependencies (`bytes = "1.10.1"`, `tokio` listed but unused)
+- `README.md`: User-facing documentation and feature overview
 
 ## Key Implementation Details
 
