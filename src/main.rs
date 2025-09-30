@@ -67,12 +67,16 @@ fn main() {
                 }
                 println!(
                     "Reverted enhancements under {} (modified {} files, skipped {}).",
-                    doc_dir.display(), files_processed, files_skipped
+                    doc_dir.display(),
+                    files_processed,
+                    files_skipped
                 );
             } else {
                 println!(
                     "Enhanced docs under {} (modified {} files, skipped {}).",
-                    doc_dir.display(), files_processed, files_skipped
+                    doc_dir.display(),
+                    files_processed,
+                    files_skipped
                 );
                 println!("Open the docs as usual (e.g., target/doc/<crate>/index.html).");
             }
@@ -85,7 +89,9 @@ fn main() {
 }
 
 fn print_usage() {
-    println!("cargo-doc-viewer\n\nUSAGE:\n  cargo-doc-viewer [enhance] [-d|--doc-dir <path>] [--revert]\n\nDESCRIPTION:\n  Enhance rustdoc HTML in-place (top search, symbols panel, chat).\n  Use --revert to remove previously injected CSS/JS.\n\nEXAMPLES:\n  cargo doc && cargo-doc-viewer\n  cargo-doc-viewer --doc-dir target/doc\n  cargo-doc-viewer --revert --doc-dir target/doc\n");
+    println!(
+        "cargo-doc-viewer\n\nUSAGE:\n  cargo-doc-viewer [enhance] [-d|--doc-dir <path>] [--revert]\n\nDESCRIPTION:\n  Enhance rustdoc HTML in-place (top search, symbols panel, chat).\n  Use --revert to remove previously injected CSS/JS.\n\nEXAMPLES:\n  cargo doc && cargo-doc-viewer\n  cargo-doc-viewer --doc-dir target/doc\n  cargo-doc-viewer --revert --doc-dir target/doc\n"
+    );
 }
 
 fn walk_and_process(
@@ -105,8 +111,15 @@ fn walk_and_process(
             }
             if path.extension() == Some(OsStr::new("html")) {
                 // Skip rustdoc special pages that are sensitive
-                if should_skip_file(&path) { *files_skipped += 1; continue; }
-                let res = if revert { revert_file(&path) } else { inject_file(&path) };
+                if should_skip_file(&path) {
+                    *files_skipped += 1;
+                    continue;
+                }
+                let res = if revert {
+                    revert_file(&path)
+                } else {
+                    inject_file(&path)
+                };
                 match res {
                     Ok(true) => *files_processed += 1,
                     Ok(false) => *files_skipped += 1,
@@ -121,11 +134,9 @@ fn walk_and_process(
 fn should_skip_file(path: &Path) -> bool {
     if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
         let name = name.to_lowercase();
-        return matches!(name.as_str(),
-            "search.html" |
-            "settings.html" |
-            "source-src.html" |
-            "cdv-crate-overview.html"  // Skip our generated overview page
+        return matches!(
+            name.as_str(),
+            "search.html" | "settings.html" | "source-src.html" | "cdv-crate-overview.html" // Skip our generated overview page
         );
     }
     false
@@ -135,39 +146,42 @@ fn should_skip_file(path: &Path) -> bool {
 fn generate_crate_overview(doc_dir: &Path) -> io::Result<()> {
     let crates = scan_crates(doc_dir)?;
     let html = generate_overview_html(&crates);
-    
+
     let overview_path = doc_dir.join("cdv-crate-overview.html");
     let mut file = fs::File::create(overview_path)?;
     file.write_all(html.as_bytes())?;
-    
+
     Ok(())
 }
 
 /// Scan the doc directory for crates (subdirectories with index.html)
 fn scan_crates(doc_dir: &Path) -> io::Result<Vec<CrateInfo>> {
     let mut crates = Vec::new();
-    
+
     for entry in fs::read_dir(doc_dir)? {
         let entry = entry?;
         let path = entry.path();
-        
+
         if path.is_dir() {
             // Check if this directory has an index.html (indicating it's a crate)
             let index_path = path.join("index.html");
             if index_path.exists() {
                 if let Some(dir_name) = path.file_name().and_then(|s| s.to_str()) {
                     // Skip common rustdoc directories that aren't crates
-                    if matches!(dir_name, "static.files" | "src" | "implementors" | "help.html") {
+                    if matches!(
+                        dir_name,
+                        "static.files" | "src" | "implementors" | "help.html"
+                    ) {
                         continue;
                     }
-                    
+
                     let crate_info = extract_crate_info(dir_name, &index_path)?;
                     crates.push(crate_info);
                 }
             }
         }
     }
-    
+
     // Sort crates by name for consistent display
     crates.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(crates)
@@ -177,14 +191,14 @@ fn scan_crates(doc_dir: &Path) -> io::Result<Vec<CrateInfo>> {
 fn extract_crate_info(dir_name: &str, index_path: &Path) -> io::Result<CrateInfo> {
     let mut content = String::new();
     fs::File::open(index_path)?.read_to_string(&mut content)?;
-    
+
     // Extract description from meta tag or first paragraph
-    let description = extract_description(&content)
-        .unwrap_or_else(|| "Rust crate documentation".to_string());
-    
+    let description =
+        extract_description(&content).unwrap_or_else(|| "Rust crate documentation".to_string());
+
     // Extract version from title or other sources
     let version = extract_version(&content);
-    
+
     Ok(CrateInfo {
         name: dir_name.to_string(),
         description,
@@ -202,7 +216,7 @@ fn extract_description(html: &str) -> Option<String> {
             return Some(html[content_start..content_start + end].to_string());
         }
     }
-    
+
     // Fall back to first paragraph in main content
     if let Some(start) = html.find("<div class=\"docblock\">") {
         let content_start = start + "<div class=\"docblock\">".len();
@@ -215,7 +229,7 @@ fn extract_description(html: &str) -> Option<String> {
             }
         }
     }
-    
+
     None
 }
 
@@ -226,16 +240,20 @@ fn extract_version(html: &str) -> Option<String> {
         let title_start = start + "<title>".len();
         if let Some(end) = html[title_start..].find("</title>") {
             let title = &html[title_start..title_start + end];
-            // Look for version pattern like "-1.0.0" 
+            // Look for version pattern like "-1.0.0"
             if let Some(dash_pos) = title.rfind("-") {
                 let potential_version = &title[dash_pos + 1..];
-                if potential_version.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                if potential_version
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_ascii_digit())
+                {
                     return Some(potential_version.to_string());
                 }
             }
         }
     }
-    
+
     None
 }
 
@@ -243,7 +261,7 @@ fn extract_version(html: &str) -> Option<String> {
 fn strip_html_tags(html: &str) -> String {
     let mut result = String::new();
     let mut in_tag = false;
-    
+
     for ch in html.chars() {
         match ch {
             '<' => in_tag = true,
@@ -252,7 +270,7 @@ fn strip_html_tags(html: &str) -> String {
             _ => {}
         }
     }
-    
+
     // Clean up whitespace and decode common HTML entities
     result
         .replace("&lt;", "<")
@@ -274,12 +292,14 @@ struct CrateInfo {
 
 /// Generate the complete HTML for the crate overview page
 fn generate_overview_html(crates: &[CrateInfo]) -> String {
-    let cards_html = crates.iter()
+    let cards_html = crates
+        .iter()
         .map(|crate_info| generate_crate_card_html(crate_info))
         .collect::<Vec<_>>()
         .join("\n");
-    
-    format!(r#"<!DOCTYPE html>
+
+    format!(
+        r#"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="utf-8">
@@ -417,7 +437,8 @@ fn generate_overview_html(crates: &[CrateInfo]) -> String {
             r#"<div class="empty-state">
                 <h2>😮 没有找到任何包</h2>
                 <p>请确保已经运行了 <code>cargo doc</code> 生成文档</p>
-            </div>"#.to_string()
+            </div>"#
+                .to_string()
         } else {
             format!(r#"<div class="crates-grid">{}</div>"#, cards_html)
         }
@@ -436,7 +457,9 @@ fn generate_crate_card_html(crate_info: &CrateInfo) -> String {
     </a>"#,
         path = crate_info.path,
         name = crate_info.name,
-        version = crate_info.version.as_ref()
+        version = crate_info
+            .version
+            .as_ref()
             .map(|v| format!(r#"<span class="crate-version">v{}</span>"#, v))
             .unwrap_or_default(),
         description = if crate_info.description.is_empty() {
@@ -472,10 +495,7 @@ fn inject_file(path: &Path) -> io::Result<bool> {
     }
 
     if let Some(idx) = modified.rfind("</body>") {
-        let body_inject = format!(
-            "<script id=\"cdv-script\">\n{}\n</script>\n",
-            CDV_JS
-        );
+        let body_inject = format!("<script id=\"cdv-script\">\n{}\n</script>\n", CDV_JS);
         let mut new_content = String::with_capacity(modified.len() + body_inject.len());
         new_content.push_str(&modified[..idx]);
         new_content.push_str(&body_inject);
@@ -534,7 +554,8 @@ const CDV_CSS: &str = r#"
 }
 
 /* Top bar */
-body { padding-top: 56px !important; }
+body { padding-top: 0 !important; }
+body.cdv-has-topbar { padding-top: 56px !important; }
 #cdv-topbar {
   position: fixed; inset: 0 0 auto 0; height: 48px; z-index: 9999;
   background: var(--cdv-bg); color: var(--cdv-fg);
@@ -615,6 +636,179 @@ body { padding-top: 56px !important; }
 #cdv-chat-input-row { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--cdv-border); }
 #cdv-chat-input { flex: 1; height: 34px; border-radius: 6px; border: 1px solid var(--cdv-border); background: rgba(255,255,255,0.06); color: var(--cdv-fg); padding: 0 10px; }
 #cdv-chat-send { height: 34px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--cdv-border); background: rgba(255,255,255,0.08); color: var(--cdv-fg); cursor: pointer; }
+
+/* Breadcrumbs */
+#cdv-breadcrumbs {
+  position: fixed; top: 56px; left: 0; right: 0;
+  display: flex; justify-content: center; pointer-events: none;
+  z-index: 9998;
+}
+body:not(.cdv-has-topbar) #cdv-breadcrumbs { top: 12px; }
+#cdv-breadcrumbs .cdv-breadcrumbs-inner {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(15,17,24,0.85);
+  border: 1px solid var(--cdv-border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  font-size: 12px;
+}
+#cdv-breadcrumbs a {
+  color: var(--cdv-fg);
+  opacity: 0.8;
+  text-decoration: none;
+}
+#cdv-breadcrumbs a:hover { color: var(--cdv-accent); opacity: 1; }
+#cdv-breadcrumbs .cdv-crumb-current {
+  color: var(--cdv-accent);
+  font-weight: 600;
+}
+#cdv-breadcrumbs .cdv-sep { opacity: 0.45; }
+.cdv-focus #cdv-breadcrumbs { opacity: 0.35; pointer-events: none; }
+
+/* Floating outline */
+#cdv-outline {
+  position: fixed;
+  top: 112px;
+  right: 16px;
+  width: 240px;
+  max-height: calc(100vh - 140px);
+  background: var(--cdv-bg);
+  color: var(--cdv-fg);
+  border: 1px solid var(--cdv-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.38);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 9996;
+}
+body:not(.cdv-has-topbar) #cdv-outline { top: 72px; }
+#cdv-outline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--cdv-border);
+  font-size: 13px;
+  font-weight: 600;
+}
+#cdv-outline-collapse {
+  background: rgba(255,255,255,0.08);
+  color: var(--cdv-fg);
+  border: 1px solid var(--cdv-border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+#cdv-outline-content {
+  overflow-y: auto;
+  padding: 8px 0;
+}
+#cdv-outline.collapsed #cdv-outline-content { display: none; }
+#cdv-outline .cdv-outline-item {
+  display: block;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: rgba(230,230,230,0.85);
+  border-left: 2px solid transparent;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  text-decoration: none;
+}
+#cdv-outline .cdv-outline-item:hover {
+  background: rgba(255,255,255,0.08);
+  color: #ffffff;
+}
+#cdv-outline .cdv-outline-item.level-3 { padding-left: 24px; font-size: 11px; opacity: 0.85; }
+#cdv-outline .cdv-outline-item.level-4 { padding-left: 32px; font-size: 11px; opacity: 0.72; }
+#cdv-outline .cdv-outline-item.level-2 { padding-left: 18px; }
+#cdv-outline .cdv-outline-item.active {
+  border-left-color: var(--cdv-accent);
+  color: var(--cdv-accent);
+  background: rgba(106,166,255,0.15);
+}
+body.cdv-chat-open #cdv-outline { right: 412px; }
+.cdv-focus #cdv-outline { display: none !important; }
+@media (max-width: 1100px) { #cdv-outline { display: none; } }
+
+/* Quick search palette */
+#cdv-quick-search {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10,12,18,0.75);
+  z-index: 10002;
+  backdrop-filter: blur(6px);
+  padding: 24px;
+}
+#cdv-quick-search.open { display: flex; }
+#cdv-quick-search-panel {
+  width: min(520px, 96vw);
+  max-height: 70vh;
+  background: var(--cdv-bg);
+  border: 1px solid var(--cdv-border);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.45);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#cdv-quick-search input {
+  width: 100%;
+  height: 38px;
+  border-radius: 8px;
+  border: 1px solid var(--cdv-border);
+  background: rgba(255,255,255,0.08);
+  color: var(--cdv-fg);
+  padding: 0 12px;
+  font-size: 14px;
+}
+#cdv-quick-search-results {
+  flex: 1;
+  overflow-y: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.05);
+  background: rgba(0,0,0,0.25);
+}
+#cdv-quick-search-results .cdv-qs-empty {
+  padding: 16px;
+  font-size: 13px;
+  opacity: 0.65;
+}
+#cdv-quick-search-results .cdv-qs-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+#cdv-quick-search-results .cdv-qs-item:last-child { border-bottom: none; }
+#cdv-quick-search-results .cdv-qs-item strong {
+  font-size: 13px;
+  color: var(--cdv-accent);
+  font-weight: 600;
+}
+#cdv-quick-search-results .cdv-qs-item span {
+  font-size: 12px;
+  opacity: 0.75;
+}
+#cdv-quick-search-results .cdv-qs-item.active {
+  background: rgba(106,166,255,0.20);
+}
+.cdv-focus #cdv-quick-search { background: rgba(10,12,18,0.9); }
+body.cdv-quick-search-open { overflow: hidden; }
+#cdv-quick-search .cdv-qs-hint {
+  font-size: 11px;
+  opacity: 0.55;
+  text-align: right;
+}
+
 
 /* Left symbols list inside existing sidebar (non-destructive) */
 .cdv-symbols-bottom { max-height: 35vh; min-height: 140px; border-top: 1px solid var(--cdv-border); overflow: auto; background: rgba(255,255,255,0.03); }
@@ -708,6 +902,9 @@ const CDV_JS: &str = r#"
       } catch(_) { return {noTop:false, noChat:false, noSymbols:false}; }
     })();
 
+    var CDV_REFRESH_QUICK = function(){};
+    var CDV_OUTLINE_STATE = { items: [], linkMap: Object.create(null), activeId: null };
+
     // Create top bar
     if (!CDV_FLAGS.noTop && !document.getElementById('cdv-topbar')) {
       var bar = document.createElement('div');
@@ -725,9 +922,13 @@ const CDV_JS: &str = r#"
         '<button id="cdv-focus-toggle" title="专注模式">Focus</button>' +
         '<button id="cdv-chat-toggle" title="Ask AI about this page">AI Chat</button>';
       document.body.appendChild(bar);
+      document.body.classList.add('cdv-has-topbar');
     }
     integrateRustdocSearch();
     setupFnDropdownTop();
+    setupBreadcrumbs();
+    setupOutline();
+    setupQuickSearch();
 
     // Home navigation dropdown
     (function setupHome(){
@@ -867,8 +1068,11 @@ const CDV_JS: &str = r#"
     var chatPanel = document.getElementById('cdv-chat-panel');
     if (!CDV_FLAGS.noChat && chatToggle && chatPanel) {
       chatToggle.addEventListener('click', function() {
-        chatPanel.classList.toggle('open');
+        var nowOpen = !chatPanel.classList.contains('open');
+        chatPanel.classList.toggle('open', nowOpen);
+        document.body.classList.toggle('cdv-chat-open', nowOpen);
       });
+      document.body.classList.toggle('cdv-chat-open', chatPanel.classList.contains('open'));
     }
 
     // We embed rustdoc's own search component inside the top bar
@@ -962,6 +1166,468 @@ const CDV_JS: &str = r#"
         } catch(_) {}
       }, 50);
     }
+
+    function setupBreadcrumbs() {
+      try {
+        var source = document.querySelector('.main-heading .rustdoc-breadcrumbs');
+        var titleEl = document.querySelector('.main-heading h1');
+        if (!source && !titleEl) return;
+        var host = document.getElementById('cdv-breadcrumbs');
+        if (!host) {
+          host = document.createElement('div');
+          host.id = 'cdv-breadcrumbs';
+          host.innerHTML = '<div class="cdv-breadcrumbs-inner"></div>';
+          document.body.appendChild(host);
+        }
+        var inner = host.querySelector('.cdv-breadcrumbs-inner');
+        if (!inner) {
+          inner = document.createElement('div');
+          inner.className = 'cdv-breadcrumbs-inner';
+          host.appendChild(inner);
+        }
+        inner.innerHTML = '';
+        var appended = false;
+        if (source) {
+          var links = Array.prototype.slice.call(source.querySelectorAll('a[href]'));
+          links.forEach(function(link, idx){
+            var text = (link.textContent || '').trim();
+            if (!text) return;
+            var a = document.createElement('a');
+            a.href = link.href || link.getAttribute('href');
+            a.textContent = text;
+            inner.appendChild(a);
+            appended = true;
+            if (idx !== links.length - 1 || titleEl) {
+              var sep = document.createElement('span');
+              sep.className = 'cdv-sep';
+              sep.textContent = '›';
+              inner.appendChild(sep);
+            }
+          });
+        }
+        var currentTitle = extractHeadingTitle(titleEl);
+        if (currentTitle) {
+          var span = document.createElement('span');
+          span.className = 'cdv-crumb-current';
+          span.textContent = currentTitle;
+          inner.appendChild(span);
+          appended = true;
+        }
+        if (!appended) {
+          host.remove();
+        }
+      } catch(_) {}
+    }
+
+    function setupOutline() {
+      try {
+        var outline = document.getElementById('cdv-outline');
+        if (!outline) {
+          outline = document.createElement('div');
+          outline.id = 'cdv-outline';
+          outline.innerHTML = ''+
+            '<div id="cdv-outline-header">'+
+              '<span>页面提纲</span>'+
+              '<button id="cdv-outline-collapse">收起</button>'+ 
+            '</div>'+
+            '<div id="cdv-outline-content"></div>';
+          document.body.appendChild(outline);
+          var collapse = outline.querySelector('#cdv-outline-collapse');
+          if (collapse) {
+            collapse.addEventListener('click', function(){
+              outline.classList.toggle('collapsed');
+              collapse.textContent = outline.classList.contains('collapsed') ? '展开' : '收起';
+            });
+          }
+        }
+        rebuildOutline();
+        installOutlineObservers(outline);
+      } catch(_) {}
+    }
+
+    function setupQuickSearch() {
+      try {
+        var overlay = document.getElementById('cdv-quick-search');
+        if (!overlay) {
+          overlay = document.createElement('div');
+          overlay.id = 'cdv-quick-search';
+          overlay.innerHTML = ''+
+            '<div id="cdv-quick-search-panel">'+
+              '<input id="cdv-quick-search-input" type="search" placeholder="搜索本页 (Ctrl+K)" autocomplete="off" spellcheck="false" />'+
+              '<div class="cdv-qs-hint">Esc 关闭 · ↑↓ 选择 · Enter 跳转</div>'+
+              '<div id="cdv-quick-search-results"></div>'+
+            '</div>';
+          document.body.appendChild(overlay);
+        }
+        var panel = overlay.querySelector('#cdv-quick-search-panel');
+        var input = overlay.querySelector('#cdv-quick-search-input');
+        var resultsHost = overlay.querySelector('#cdv-quick-search-results');
+        if (!panel || !input || !resultsHost) return;
+
+        var activeIdx = -1;
+        var searchIndex = buildQuickSearchIndex();
+
+        function render(list) {
+          resultsHost.innerHTML = '';
+          if (!list.length) {
+            var empty = document.createElement('div');
+            empty.className = 'cdv-qs-empty';
+            empty.textContent = input.value.trim() ? '未找到匹配项' : '输入关键字快速定位本页章节或函数';
+            resultsHost.appendChild(empty);
+            activeIdx = -1;
+            return;
+          }
+          var frag = document.createDocumentFragment();
+          list.forEach(function(entry, idx){
+            var item = document.createElement('div');
+            item.className = 'cdv-qs-item' + (idx === activeIdx ? ' active' : '');
+            item.setAttribute('data-id', entry.id);
+            item.innerHTML = '<strong>'+escapeHtml(entry.title)+'</strong>'+
+              '<span>'+escapeHtml(entry.hint)+'</span>';
+            item.addEventListener('click', function(){
+              navigateToId(entry.id);
+              closePalette();
+            });
+            frag.appendChild(item);
+          });
+          resultsHost.appendChild(frag);
+        }
+
+        var currentItems = [];
+
+        function applyFilter(q) {
+          q = (q || '').trim();
+          activeIdx = -1;
+          var list = searchEntries(searchIndex, q);
+          render(list);
+          currentItems = list;
+        }
+
+        function openPalette() {
+          overlay.classList.add('open');
+          document.body.classList.add('cdv-quick-search-open');
+          applyFilter('');
+          input.value = '';
+          setTimeout(function(){ input.focus(); }, 10);
+        }
+
+        function closePalette() {
+          overlay.classList.remove('open');
+          document.body.classList.remove('cdv-quick-search-open');
+          activeIdx = -1;
+        }
+
+        overlay.addEventListener('click', function(ev){ if (ev.target === overlay) closePalette(); });
+
+        input.addEventListener('input', function(){ applyFilter(input.value); });
+        input.addEventListener('keydown', function(ev){
+          if (ev.key === 'ArrowDown') {
+            ev.preventDefault();
+            if (!currentItems.length) return;
+            activeIdx = (activeIdx + 1) % currentItems.length;
+            updateActive();
+            return;
+          }
+          if (ev.key === 'ArrowUp') {
+            ev.preventDefault();
+            if (!currentItems.length) return;
+            activeIdx = (activeIdx - 1 + currentItems.length) % currentItems.length;
+            updateActive();
+            return;
+          }
+          if (ev.key === 'Enter') {
+            if (activeIdx >= 0 && activeIdx < currentItems.length) {
+              ev.preventDefault();
+              navigateToId(currentItems[activeIdx].id);
+              closePalette();
+            } else if (currentItems.length === 1) {
+              navigateToId(currentItems[0].id);
+              closePalette();
+            }
+            return;
+          }
+          if (ev.key === 'Escape') {
+            ev.preventDefault();
+            closePalette();
+          }
+        });
+
+        function updateActive() {
+          var items = resultsHost.querySelectorAll('.cdv-qs-item');
+          items.forEach(function(el, idx){ el.classList.toggle('active', idx === activeIdx); });
+          if (activeIdx >= 0) {
+            var activeEl = items[activeIdx];
+            if (activeEl && activeEl.scrollIntoView) {
+              activeEl.scrollIntoView({block:'nearest'});
+            }
+          }
+        }
+
+        document.addEventListener('keydown', function(ev){
+          if (overlay.classList.contains('open')) {
+            if (ev.key === 'Escape') { closePalette(); return; }
+            if (ev.key === 'k' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); closePalette(); }
+            return;
+          }
+          if (ev.defaultPrevented) return;
+          if (ev.key === 'k' && (ev.metaKey || ev.ctrlKey)) {
+            ev.preventDefault();
+            openPalette();
+          } else if (ev.key === '/' && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+            var tag = (document.activeElement && document.activeElement.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || document.activeElement.isContentEditable) return;
+            ev.preventDefault();
+            openPalette();
+          }
+        });
+
+        CDV_REFRESH_QUICK = function(){
+          searchIndex = buildQuickSearchIndex();
+          if (overlay.classList.contains('open')) {
+            applyFilter(input.value);
+          }
+        };
+
+        render([]);
+
+      } catch(_) {}
+    }
+
+    function navigateToId(id) {
+      try {
+        if (!id) return;
+        var el = document.getElementById(id);
+        if (!el) return;
+        scrollWithOffset(el);
+        try {
+          if (history.replaceState) {
+            history.replaceState(null, '', '#' + id);
+          } else {
+            location.hash = id;
+          }
+        } catch(_) {
+          location.hash = id;
+        }
+        highlightAnchorTarget(id);
+      } catch(_) {}
+    }
+
+    function scrollWithOffset(el) {
+      try {
+        var rect = el.getBoundingClientRect();
+        var topbarOffset = document.body.classList.contains('cdv-has-topbar') ? 70 : 32;
+        var target = window.scrollY + rect.top - topbarOffset;
+        if (target < 0) target = 0;
+        window.scrollTo({top: target, behavior: 'smooth'});
+      } catch(_) {
+        try { el.scrollIntoView({behavior:'smooth', block:'start'}); } catch(__) {}
+      }
+    }
+
+    function buildQuickSearchIndex() {
+      var list = [];
+      var seen = Object.create(null);
+      var outlineItems = (CDV_OUTLINE_STATE.items && CDV_OUTLINE_STATE.items.length) ? CDV_OUTLINE_STATE.items : collectOutlineData();
+      outlineItems.forEach(function(item){
+        if (!item || !item.id) return;
+        if (seen[item.id]) return;
+        seen[item.id] = true;
+        var hint = '章节 · H' + (item.level || 2);
+        list.push(makeSearchEntry(item.id, item.title, hint));
+      });
+      try {
+        collectFunctions().forEach(function(fn){
+          if (!fn || !fn.href) return;
+          var id = fn.href.replace(/^#/, '');
+          if (!id || seen[id]) return;
+          seen[id] = true;
+          list.push(makeSearchEntry(id, fn.title || id, '函数'));
+        });
+      } catch(_) {}
+      return list;
+    }
+
+    function makeSearchEntry(id, title, hint) {
+      title = (title || '').trim();
+      hint = (hint || '').trim();
+      var entry = {
+        id: id,
+        title: title || id,
+        hint: hint ? hint + ' · #' + id : '#' + id
+      };
+      entry.titleLower = entry.title.toLowerCase();
+      entry.hintLower = entry.hint.toLowerCase();
+      entry.searchText = entry.titleLower + ' ' + entry.hintLower + ' ' + id.toLowerCase();
+      return entry;
+    }
+
+    function searchEntries(source, query) {
+      if (!query) return source.slice(0, 40);
+      var terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+      if (!terms.length) return source.slice(0, 40);
+      var scored = [];
+      for (var i=0; i<source.length; i++) {
+        var entry = source[i];
+        var score = 0;
+        for (var j=0; j<terms.length; j++) {
+          var term = terms[j];
+          if (entry.titleLower.startsWith(term)) score += 6;
+          if (entry.titleLower.indexOf(term) >= 0) score += 4;
+          if (entry.hintLower.indexOf(term) >= 0) score += 2;
+          if (entry.searchText.indexOf(term) >= 0) score += 1;
+        }
+        if (score > 0) {
+          scored.push({entry: entry, score: score});
+        }
+      }
+      scored.sort(function(a, b){ return b.score - a.score; });
+      return scored.slice(0, 40).map(function(x){ return x.entry; });
+    }
+
+    function collectOutlineData() {
+      try {
+        var main = document.querySelector('main') || document.body;
+        if (!main) return [];
+        var nodes = Array.prototype.slice.call(main.querySelectorAll('h1[id], h2[id], h3[id], h4[id]'));
+        var seen = Object.create(null);
+        var list = [];
+        nodes.forEach(function(node){
+          var id = node.getAttribute('id');
+          if (!id || seen[id]) return;
+          seen[id] = true;
+          var title = extractHeadingTitle(node);
+          if (!title) return;
+          var level = parseInt(node.tagName.slice(1), 10);
+          if (!level || level < 1) level = 2;
+          list.push({ id: id, title: title, level: level, element: node });
+        });
+        return list;
+      } catch(_) { return []; }
+    }
+
+    function extractHeadingTitle(node) {
+      if (!node) return '';
+      try {
+        var clone = node.cloneNode(true);
+        Array.prototype.slice.call(clone.querySelectorAll('button, .cdv-copy-anchor, #copy-path, rustdoc-toolbar, svg, .since, .out-of-band')).forEach(function(el){
+          if (el && el.parentNode) el.parentNode.removeChild(el);
+        });
+        return (clone.textContent || '').replace(/\s+/g, ' ').trim();
+      } catch(_) {
+        return (node.textContent || '').replace(/\s+/g, ' ').trim();
+      }
+    }
+
+    function highlightAnchorTarget(id) {
+      try {
+        if (!id) return;
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.classList.add('cdv-anchor-target');
+        setTimeout(function(){ try { el.classList.remove('cdv-anchor-target'); } catch(_) {} }, 1500);
+      } catch(_) {}
+    }
+
+    function rebuildOutline() {
+      try {
+        var outline = document.getElementById('cdv-outline');
+        if (!outline) return;
+        var content = outline.querySelector('#cdv-outline-content');
+        if (!content) return;
+        var data = collectOutlineData();
+        var map = Object.create(null);
+        content.innerHTML = '';
+        if (!data.length) {
+          outline.style.display = 'none';
+          CDV_OUTLINE_STATE.items = [];
+          CDV_OUTLINE_STATE.linkMap = map;
+          CDV_OUTLINE_STATE.activeId = null;
+          CDV_REFRESH_QUICK();
+          return;
+        }
+        outline.style.display = '';
+        var frag = document.createDocumentFragment();
+        data.forEach(function(item){
+          var level = item.level;
+          if (level < 2) level = 2;
+          if (level > 4) level = 4;
+          var link = document.createElement('a');
+          link.className = 'cdv-outline-item level-' + level;
+          link.textContent = item.title;
+          link.href = '#' + item.id;
+          link.addEventListener('click', function(ev){ ev.preventDefault(); navigateToId(item.id); });
+          map[item.id] = link;
+          frag.appendChild(link);
+        });
+        content.appendChild(frag);
+        CDV_OUTLINE_STATE.items = data;
+        CDV_OUTLINE_STATE.linkMap = map;
+        refreshOutlineActive(true);
+        CDV_REFRESH_QUICK();
+      } catch(_) {}
+    }
+
+    function refreshOutlineActive(force) {
+      try {
+        if (!CDV_OUTLINE_STATE.items || !CDV_OUTLINE_STATE.items.length) return;
+        var threshold = window.scrollY + (document.body.classList.contains('cdv-has-topbar') ? 90 : 50);
+        var current = CDV_OUTLINE_STATE.items[0];
+        for (var i=0; i<CDV_OUTLINE_STATE.items.length; i++) {
+          var item = CDV_OUTLINE_STATE.items[i];
+          if (!item.element) continue;
+          var top = item.element.getBoundingClientRect().top + window.scrollY;
+          if (top - threshold <= 1) {
+            current = item;
+          } else {
+            break;
+          }
+        }
+        if (!current) current = CDV_OUTLINE_STATE.items[0];
+        if (!current) return;
+        if (!force && CDV_OUTLINE_STATE.activeId === current.id) return;
+        CDV_OUTLINE_STATE.activeId = current.id;
+        var map = CDV_OUTLINE_STATE.linkMap || {};
+        for (var key in map) {
+          if (!Object.prototype.hasOwnProperty.call(map, key)) continue;
+          var link = map[key];
+          if (link && link.classList) link.classList.toggle('active', key === current.id);
+        }
+      } catch(_) {}
+    }
+
+    var outlineObserverInstalled = false;
+    function installOutlineObservers(outline) {
+      if (outlineObserverInstalled) return;
+      outlineObserverInstalled = true;
+      try {
+        var scheduled = false;
+        function schedule() {
+          if (scheduled) return;
+          scheduled = true;
+          setTimeout(function(){ scheduled = false; rebuildOutline(); }, 160);
+        }
+        var mo = new MutationObserver(function(muts){
+          for (var i=0; i<muts.length; i++) {
+            var target = muts[i].target;
+            if (outline.contains(target)) continue;
+            schedule();
+            return;
+          }
+        });
+        mo.observe(document.body, {subtree: true, childList: true});
+      } catch(_) {}
+      var scrollTick = false;
+      window.addEventListener('scroll', function(){
+        if (!CDV_OUTLINE_STATE.items.length) return;
+        if (scrollTick) return;
+        scrollTick = true;
+        requestAnimationFrame(function(){ scrollTick = false; refreshOutlineActive(false); });
+      });
+      window.addEventListener('hashchange', function(){ refreshOutlineActive(true); });
+      window.addEventListener('load', function(){ refreshOutlineActive(true); });
+      setTimeout(function(){ refreshOutlineActive(true); }, 200);
+    }
+
 
     function buildDocsHomeUrl(toCrate) {
       try {
@@ -1067,13 +1733,7 @@ const CDV_JS: &str = r#"
           navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(url) : document.execCommand('copy');
         } catch(_) {}
       }
-      function markAnchorTarget(id){
-        try {
-          var el = document.getElementById(id); if (!el) return;
-          el.classList.add('cdv-anchor-target');
-          setTimeout(function(){ el.classList.remove('cdv-anchor-target'); }, 1500);
-        } catch(_) {}
-      }
+      function markAnchorTarget(id){ highlightAnchorTarget(id); }
     })();
 
     // Add copy buttons to code blocks
@@ -1496,11 +2156,7 @@ const CDV_JS: &str = r#"
         var v = sel.value; if (!v) return;
         try {
           var id = v.replace(/^#/, '');
-          var el = document.getElementById(id);
-          if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
-          if (location.hash !== v) {
-            try { history.replaceState(null, '', v); } catch(_) { location.hash = v; }
-          }
+          navigateToId(id);
         } catch(_) {}
       });
       into.innerHTML = '';
@@ -1549,9 +2205,7 @@ const CDV_JS: &str = r#"
             var v = sel.value; if (!v) return;
             try {
               var id = v.replace(/^#/, '');
-              var el = document.getElementById(id);
-              if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
-              location.hash = v;
+              navigateToId(id);
             } catch(_) {}
           });
         }
@@ -1578,11 +2232,18 @@ const CDV_JS: &str = r#"
       window.addEventListener('hashchange', schedule);
       try {
         var mo = new MutationObserver(function(muts){
+          var outline = document.getElementById('cdv-outline');
+          var crumbs = document.getElementById('cdv-breadcrumbs');
+          var quick = document.getElementById('cdv-quick-search');
           for (var i=0;i<muts.length;i++) {
             var t = muts[i].target;
-            if ((host && host.contains(t)) || (topbar && topbar.contains(t))) return; // ignore our own UI changes
+            if ((host && host.contains(t)) || (topbar && topbar.contains(t))) continue;
+            if (outline && outline.contains(t)) continue;
+            if (crumbs && crumbs.contains(t)) continue;
+            if (quick && quick.contains(t)) continue;
+            schedule();
+            return;
           }
-          schedule();
         });
         mo.observe(document.body, {subtree:true, childList:true});
       } catch(_) {}
