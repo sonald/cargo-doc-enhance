@@ -153,12 +153,107 @@
     (function setupFocus(){
       var btn = document.getElementById('cdv-focus-toggle');
       if (!btn) return;
+
       var key = 'cdv.focus';
-      function apply(v){ document.documentElement.classList.toggle('cdv-focus', !!v); }
-      try { apply(localStorage.getItem(key)==='1'); } catch(_) {}
+      var progressBar = null;
+      var focusActive = false;
+      var rafId = 0;
+
+      var onScroll = function(){ scheduleProgress(); };
+      var onResize = function(){ scheduleProgress(); };
+
+      function ensureProgressBar() {
+        if (progressBar && document.body.contains(progressBar)) return;
+        progressBar = document.createElement('div');
+        progressBar.id = 'cdv-focus-progress';
+        progressBar.setAttribute('aria-hidden', 'true');
+        progressBar.style.width = '0%';
+        document.body.appendChild(progressBar);
+      }
+
+      function destroyProgressBar() {
+        if (progressBar && progressBar.parentNode) {
+          progressBar.parentNode.removeChild(progressBar);
+        }
+        progressBar = null;
+      }
+
+      function updateButton(active) {
+        btn.textContent = active ? 'Exit Focus' : 'Focus';
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        btn.setAttribute('title', active ? '退出专注模式' : '专注模式');
+        if (active) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      }
+
+      function updateProgress() {
+        if (!progressBar) return;
+        var doc = document.scrollingElement || document.documentElement || document.body;
+        var max = Math.max(1, doc.scrollHeight - doc.clientHeight);
+        var pct = doc.scrollTop / max;
+        if (pct < 0) pct = 0;
+        if (pct > 1) pct = 1;
+        progressBar.style.width = (pct * 100).toFixed(3) + '%';
+      }
+
+      function scheduleProgress() {
+        if (!focusActive || !progressBar) return;
+        if (rafId) return;
+        rafId = window.requestAnimationFrame ? window.requestAnimationFrame(function(){
+          rafId = 0;
+          updateProgress();
+        }) : (updateProgress(), 0);
+      }
+
+      function attachListeners() {
+        window.addEventListener('scroll', onScroll, false);
+        window.addEventListener('resize', onResize, false);
+        scheduleProgress();
+      }
+
+      function detachListeners() {
+        window.removeEventListener('scroll', onScroll, false);
+        window.removeEventListener('resize', onResize, false);
+        if (rafId && window.cancelAnimationFrame) {
+          window.cancelAnimationFrame(rafId);
+        }
+        rafId = 0;
+      }
+
+      function apply(state) {
+        var active = !!state;
+        if (focusActive === active) {
+          updateButton(active);
+          if (active) {
+            scheduleProgress();
+          }
+          return;
+        }
+        focusActive = active;
+        document.documentElement.classList.toggle('cdv-focus', active);
+        updateButton(active);
+
+        if (active) {
+          ensureProgressBar();
+          attachListeners();
+          updateProgress();
+        } else {
+          detachListeners();
+          destroyProgressBar();
+        }
+      }
+
+      var initial = false;
+      try { initial = localStorage.getItem(key) === '1'; } catch (_) {}
+      apply(initial);
+
       btn.addEventListener('click', function(){
-        var v = !document.documentElement.classList.contains('cdv-focus');
-        apply(v); try { localStorage.setItem(key, v?'1':'0'); } catch(_) {}
+        var next = !focusActive;
+        apply(next);
+        try { localStorage.setItem(key, next ? '1' : '0'); } catch (_) {}
       });
     })();
 
