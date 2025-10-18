@@ -155,9 +155,33 @@
       if (!btn) return;
 
       var key = 'cdv.focus';
+      var widthKey = 'cdv.focusWidth';
       var progressBar = null;
       var focusActive = false;
       var rafId = 0;
+      var widthControl = null;
+      var currentWidthId = null;
+      var widthOptions = [
+        {
+          id: 'compact',
+          label: '紧凑',
+          width: 'min(960px, 92vw)',
+          padding: 'clamp(24px, 4vw, 44px)'
+        },
+        {
+          id: 'comfort',
+          label: '标准',
+          width: 'min(1180px, 96vw)',
+          padding: 'clamp(26px, 5vw, 52px)'
+        },
+        {
+          id: 'expanded',
+          label: '宽屏',
+          width: 'min(1480px, 98vw)',
+          padding: 'clamp(28px, 6vw, 58px)'
+        }
+      ];
+      var defaultWidthId = 'comfort';
 
       var onScroll = function(){ scheduleProgress(); };
       var onResize = function(){ scheduleProgress(); };
@@ -187,6 +211,89 @@
         } else {
           btn.classList.remove('active');
         }
+      }
+
+      function getWidthOption(id) {
+        for (var i = 0; i < widthOptions.length; i += 1) {
+          if (widthOptions[i].id === id) {
+            return widthOptions[i];
+          }
+        }
+        return null;
+      }
+
+      function loadWidthPreference() {
+        try {
+          var saved = localStorage.getItem(widthKey);
+          if (saved && getWidthOption(saved)) {
+            return saved;
+          }
+        } catch (_) {}
+        return defaultWidthId;
+      }
+
+      function ensureWidthControl() {
+        if (widthControl && document.body.contains(widthControl)) {
+          return widthControl;
+        }
+        var bar = document.getElementById('cdv-topbar');
+        if (!bar) return null;
+        widthControl = document.createElement('div');
+        widthControl.id = 'cdv-focus-width-control';
+        var label = document.createElement('span');
+        label.textContent = '宽度';
+        widthControl.appendChild(label);
+
+        widthOptions.forEach(function(opt){
+          var button = document.createElement('button');
+          button.type = 'button';
+          button.setAttribute('data-width-id', opt.id);
+          button.textContent = opt.label;
+          button.addEventListener('click', function(){
+            applyWidthSetting(opt.id, true);
+          });
+          widthControl.appendChild(button);
+        });
+
+        var focusToggle = document.getElementById('cdv-focus-toggle');
+        if (focusToggle && focusToggle.parentElement === bar) {
+          bar.insertBefore(widthControl, focusToggle.nextSibling);
+        } else {
+          bar.appendChild(widthControl);
+        }
+
+        return widthControl;
+      }
+
+      function updateWidthButtons(activeId) {
+        if (!widthControl) return;
+        var buttons = widthControl.querySelectorAll('button[data-width-id]');
+        buttons.forEach(function(button){
+          if (button.getAttribute('data-width-id') === activeId) {
+            button.classList.add('active');
+          } else {
+            button.classList.remove('active');
+          }
+        });
+      }
+
+      function applyWidthSetting(id, persist) {
+        var opt = getWidthOption(id) || getWidthOption(defaultWidthId);
+        if (!opt) return;
+        currentWidthId = opt.id;
+        document.body.style.setProperty('--cdv-focus-width', opt.width);
+        document.body.style.setProperty('--cdv-focus-padding', opt.padding);
+        updateWidthButtons(currentWidthId);
+        if (persist) {
+          try {
+            localStorage.setItem(widthKey, currentWidthId);
+          } catch (_) {}
+        }
+      }
+
+      function clearWidthSetting() {
+        document.body.style.removeProperty('--cdv-focus-width');
+        document.body.style.removeProperty('--cdv-focus-padding');
       }
 
       function updateProgress() {
@@ -229,6 +336,11 @@
           updateButton(active);
           if (active) {
             scheduleProgress();
+            if (!currentWidthId) {
+              currentWidthId = loadWidthPreference();
+            }
+            ensureWidthControl();
+            applyWidthSetting(currentWidthId, false);
           }
           return;
         }
@@ -240,9 +352,13 @@
           ensureProgressBar();
           attachListeners();
           updateProgress();
+          currentWidthId = loadWidthPreference();
+          ensureWidthControl();
+          applyWidthSetting(currentWidthId, false);
         } else {
           detachListeners();
           destroyProgressBar();
+          clearWidthSetting();
         }
       }
 
@@ -255,6 +371,17 @@
         apply(next);
         try { localStorage.setItem(key, next ? '1' : '0'); } catch (_) {}
       });
+
+      // Allow width preference to be changed even if focus was active via storage
+      if (document.documentElement.classList.contains('cdv-focus')) {
+        focusActive = true;
+        ensureProgressBar();
+        attachListeners();
+        updateProgress();
+        currentWidthId = loadWidthPreference();
+        ensureWidthControl();
+        applyWidthSetting(currentWidthId, false);
+      }
     })();
 
     // Search result filters
