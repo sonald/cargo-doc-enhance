@@ -144,6 +144,110 @@ pub fn generate_overview_html(crates: &[CrateInfo]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
+    let datalist_html = crates
+        .iter()
+        .map(|krate| format!(r#"<option value="{}"></option>"#, escape_attr(&krate.name)))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let has_crates = !crates.is_empty();
+
+    let search_section = if has_crates {
+        format!(
+            r#"<div class="search-container">
+        <label class="visually-hidden" for="crate-search">搜索包</label>
+        <input
+            type="search"
+            id="crate-search"
+            class="search-input"
+            placeholder="搜索包名称或描述…"
+            autocomplete="off"
+            list="crate-list"
+        />
+        <datalist id="crate-list">
+            {datalist}
+        </datalist>
+    </div>"#,
+            datalist = datalist_html
+        )
+    } else {
+        String::new()
+    };
+
+    let no_results_html = if has_crates {
+        r#"<div id="no-results" class="empty-state" hidden>
+        <h2>🙈 没有匹配的包</h2>
+        <p>尝试更短的关键字或清空搜索框</p>
+    </div>"#
+            .to_string()
+    } else {
+        String::new()
+    };
+
+    let filter_script = if has_crates {
+        r#"<script>
+(function () {
+    const searchInput = document.getElementById("crate-search");
+    const grid = document.querySelector(".crates-grid");
+    const noResults = document.getElementById("no-results");
+
+    if (!searchInput || !grid) {
+        return;
+    }
+
+    const cards = Array.from(grid.querySelectorAll(".crate-card"));
+
+    const applyFilter = (rawValue) => {
+        const terms = rawValue
+            .trim()
+            .toLowerCase()
+            .split(/\s+/)
+            .filter(Boolean);
+
+        let visibleCount = 0;
+
+        cards.forEach((card) => {
+            const name = (card.dataset.name || "").toLowerCase();
+            const descriptionElement = card.querySelector(".crate-description");
+            const description = descriptionElement
+                ? (descriptionElement.textContent || "").toLowerCase()
+                : "";
+            const haystack = name + " " + description;
+            const isMatch =
+                terms.length === 0 ||
+                terms.every((term) => haystack.includes(term));
+
+            card.style.display = isMatch ? "" : "none";
+
+            if (isMatch) {
+                visibleCount += 1;
+            }
+        });
+
+        if (noResults) {
+            noResults.hidden = !(visibleCount === 0 && terms.length > 0);
+        }
+    };
+
+    searchInput.addEventListener("input", (event) => {
+        applyFilter(event.target.value || "");
+    });
+
+    searchInput.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            searchInput.value = "";
+            applyFilter("");
+        }
+    });
+
+    applyFilter("");
+})();
+</script>"#
+            .to_string()
+    } else {
+        String::new()
+    };
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="zh-CN">
@@ -190,6 +294,45 @@ pub fn generate_overview_html(crates: &[CrateInfo]) -> String {
         .header p {{
             font-size: 1.1rem;
             opacity: 0.8;
+        }}
+        
+        .search-container {{
+            margin: 2rem auto 0;
+            max-width: 480px;
+            position: relative;
+        }}
+        
+        .search-input {{
+            width: 100%;
+            border-radius: 999px;
+            border: 1px solid var(--cdv-border);
+            background: rgba(0,0,0,0.35);
+            color: var(--cdv-fg);
+            padding: 0.85rem 1.1rem;
+            font-size: 1rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }}
+        
+        .search-input::placeholder {{
+            color: rgba(255,255,255,0.5);
+        }}
+        
+        .search-input:focus {{
+            outline: none;
+            border-color: var(--cdv-accent);
+            box-shadow: 0 0 0 3px rgba(106,166,255,0.2);
+        }}
+        
+        .visually-hidden {{
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
         }}
         
         .crates-grid {{
@@ -261,11 +404,15 @@ pub fn generate_overview_html(crates: &[CrateInfo]) -> String {
             
             .crates-grid {{
                 grid-template-columns: 1fr;
-                gap: 1rem;
+            gap: 1rem;
             }}
             
             .header h1 {{
                 font-size: 2rem;
+            }}
+            
+            .search-container {{
+                margin-top: 1.5rem;
             }}
         }}
     </style>
@@ -274,11 +421,15 @@ pub fn generate_overview_html(crates: &[CrateInfo]) -> String {
     <div class="header">
         <h1>📦 所有包概览</h1>
         <p>点击任意卡片查看对应包的文档</p>
+        {search}
     </div>
     
     {content}
+    {no_results}
+    {script}
 </body>
 </html>"#,
+        search = search_section,
         content = if crates.is_empty() {
             r#"<div class="empty-state">
                 <h2>😮 没有找到任何包</h2>
@@ -287,13 +438,15 @@ pub fn generate_overview_html(crates: &[CrateInfo]) -> String {
                 .to_string()
         } else {
             format!(r#"<div class="crates-grid">{}</div>"#, cards_html)
-        }
+        },
+        no_results = no_results_html,
+        script = filter_script
     )
 }
 
 fn generate_crate_card_html(crate_info: &CrateInfo) -> String {
     format!(
-        r#"<a href="{path}" class="crate-card">
+        r#"<a href="{path}" class="crate-card" data-name="{name_attr}">
         <div class="crate-name">
             {name}
             {version}
@@ -307,10 +460,28 @@ fn generate_crate_card_html(crate_info: &CrateInfo) -> String {
             .as_ref()
             .map(|v| format!(r#"<span class="crate-version">v{}</span>"#, v))
             .unwrap_or_default(),
+        name_attr = escape_attr(&crate_info.name),
         description = if crate_info.description.is_empty() {
             "Rust crate documentation".to_string()
         } else {
             crate_info.description.clone()
         }
     )
+}
+
+fn escape_attr(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+
+    escaped
 }
