@@ -16,6 +16,98 @@ use tokio_util::io::ReaderStream;
 use crate::injector;
 use crate::overview;
 
+const SERVICE_WORKER_JS: &str = r#"const CACHE_VERSION = 'v1';
+const HTML_CACHE = 'cdv-html-' + CACHE_VERSION;
+const STATIC_CACHE = 'cdv-static-' + CACHE_VERSION;
+const OFFLINE_HTML = '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>离线模式</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="font-family: sans-serif; padding: 24px; background: #111; color: #f0f0f0;"><h1>📡 无法连接到 Cargo Doc Viewer</h1><p>当前处于离线状态，且没有缓存的页面可以展示。</p><p>重新连接后刷新页面即可恢复。</p></body></html>';
+
+self.addEventListener('install', function(event) {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', function(event) {
+  event.waitUntil(
+    caches.keys().then(function(keys) {
+      return Promise.all(keys.filter(function(key) {
+        return !key.startsWith('cdv-html-') && !key.startsWith('cdv-static-');
+      }).map(function(key) { return caches.delete(key); }));
+    }).then(function() {
+      return self.clients.claim();
+    })
+  );
+});
+
+function isHtmlRequest(request) {
+  var accept = request.headers.get('accept') || '';
+  return accept.indexOf('text/html') !== -1;
+}
+
+function shouldCacheStatic(pathname) {
+  return /\.(?:css|js|wasm|json|png|jpe?g|svg|gif|ico|woff2?|ttf)$/.test(pathname);
+}
+
+self.addEventListener('fetch', function(event) {
+  var request = event.request;
+  if (request.method !== 'GET') return;
+
+  var url = new URL(request.url);
+  if (url.origin !== location.origin) return;
+
+  if (url.pathname === '/cdv-sw.js') {
+    return;
+  }
+
+  if (isHtmlRequest(request)) {
+    event.respondWith(
+      fetch(request).then(function(response) {
+        var copy = response.clone();
+        caches.open(HTML_CACHE).then(function(cache) {
+          cache.put(request, copy);
+        });
+        return response;
+      }).catch(function() {
+        return caches.open(HTML_CACHE).then(function(cache) {
+          return cache.match(request).then(function(cached) {
+            if (cached) return cached;
+            return new Response(OFFLINE_HTML, {
+              headers: {'Content-Type': 'text/html; charset=utf-8'}
+            });
+          });
+        });
+      })
+    );
+    return;
+  }
+
+  if (!shouldCacheStatic(url.pathname)) {
+    return;
+  }
+
+  event.respondWith(
+    caches.open(STATIC_CACHE).then(function(cache) {
+      return cache.match(request).then(function(cached) {
+        if (cached) {
+          fetch(request).then(function(response) {
+            if (response && response.ok) {
+              cache.put(request, response.clone());
+            }
+          }).catch(function(){});
+          return cached;
+        }
+        return fetch(request).then(function(response) {
+          if (response && response.ok) {
+            cache.put(request, response.clone());
+          }
+          return response;
+        }).catch(function() {
+          return new Response('', { status: 503, statusText: 'Offline' });
+        });
+      });
+    })
+  );
+});
+"#;
+
 pub async fn run(doc_dir: &Path, addr: SocketAddr) -> io::Result<()> {
     let state = Arc::new(ServerState::new(doc_dir).await?);
 
@@ -135,6 +227,7 @@ async fn dispatch(state: Arc<ServerState>, path: &str) -> Result<Response<Body>,
     match path {
         "/" | "/index.html" => serve_overview(state).await,
         "/cdv-crate-overview.html" => serve_overview(state).await,
+        "/cdv-sw.js" => serve_service_worker().await,
         _ => serve_path(state, path).await,
     }
 }
@@ -193,6 +286,19 @@ async fn serve_file(path: &Path) -> Result<Response<Body>, ServerError> {
         .map_err(|err| ServerError::Internal(err.to_string()))?;
 
     Ok(response)
+}
+
+async fn serve_service_worker() -> Result<Response<Body>, ServerError> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )
+        .header(header::CACHE_CONTROL, "no-store")
+        .header("Service-Worker-Allowed", "/")
+        .body(Body::from(SERVICE_WORKER_JS))
+        .map_err(|err| ServerError::Internal(err.to_string()))
 }
 
 #[derive(Debug)]

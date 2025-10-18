@@ -58,6 +58,20 @@
       } catch(_) { return {noTop:false, noChat:false, noSymbols:false}; }
     })();
 
+    (function registerServiceWorker(){
+      try {
+        if (!('serviceWorker' in navigator)) return;
+        var proto = String(location.protocol || '');
+        if (proto !== 'http:' && proto !== 'https:') return;
+        var swUrl = new URL('cdv-sw.js', location.href);
+        navigator.serviceWorker.register(swUrl.href, {scope: './'}).catch(function(err){
+          console.warn('[CDV] Failed to register service worker:', err);
+        });
+      } catch (err) {
+        console.warn('[CDV] Service worker registration error:', err);
+      }
+    })();
+
     var CDV_REFRESH_QUICK = function(){};
     var CDV_OUTLINE_STATE = { items: [], linkMap: Object.create(null), activeId: null };
 

@@ -41,6 +41,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. Stream non-HTML assets directly
 3. For `.html`, read content and call `injector::inject` before responding
 4. `/` and `/cdv-crate-overview.html` render the overview via `overview::scan_crates`
+5. `/cdv-sw.js` serves a Service Worker that caches HTML/static assets for offline reuse
 
 ### Static Enhance/Revert
 - `enhance::enhance_dir` walks all HTML files, skipping rustdoc internals

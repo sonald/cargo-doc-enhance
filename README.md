@@ -31,6 +31,7 @@ A tool that enhances Rust documentation browsing experience by injecting interac
 - **标题深链接** - 点击复制标题链接，高亮显示
 - **滚动位置记忆** - 刷新页面后恢复滚动位置
 - **响应式设计** - 适配各种屏幕尺寸
+- **离线缓存** - Service Worker 自动缓存页面与静态资源，断网时也能回看
 
 ### 🔧 开发者友好 Developer Friendly
 - **幂等操作** - 可安全多次运行，自动检测已注入内容
@@ -108,6 +109,7 @@ EXAMPLES:
 2. **运行时注入** - 在返回内容前插入 CSS/JS，不对磁盘文件做任何修改
 3. **概览页面** - `/cdv-crate-overview.html` 动态扫描 `doc` 目录并实时渲染
 4. **可选静态模式** - `enhance` 子命令仍可就地改写 HTML，并写入标记便于 `revert`
+5. **Service Worker** - 首次访问后自动注册，缓存 HTML 与静态资源以支持离线浏览
 
 ### 架构特点 Architecture Features
 
