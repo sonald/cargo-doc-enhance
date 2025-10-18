@@ -161,6 +161,41 @@ body:not(.cdv-has-topbar) #cdv-outline { top: 72px; }
   padding: 8px 0;
 }
 #cdv-outline.collapsed #cdv-outline-content { display: none; }
+#cdv-outline .cdv-outline-group {
+  display: flex;
+  flex-direction: column;
+}
+#cdv-outline .cdv-outline-group-header {
+  display: flex;
+  align-items: center;
+}
+#cdv-outline .cdv-outline-toggle {
+  width: 22px;
+  height: 22px;
+  margin-left: 8px;
+  margin-right: -6px;
+  border: none;
+  background: none;
+  color: rgba(230,230,230,0.75);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+#cdv-outline .cdv-outline-toggle:hover {
+  color: #ffffff;
+}
+#cdv-outline .cdv-outline-toggle::before {
+  content: '▸';
+  display: inline-block;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+  font-size: 12px;
+}
+#cdv-outline .cdv-outline-group.expanded > .cdv-outline-group-header .cdv-outline-toggle::before {
+  transform: rotate(90deg);
+}
 #cdv-outline .cdv-outline-item {
   display: block;
   padding: 6px 14px;
@@ -170,6 +205,12 @@ body:not(.cdv-has-topbar) #cdv-outline { top: 72px; }
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
   text-decoration: none;
 }
+#cdv-outline .cdv-outline-group-header .cdv-outline-item {
+  flex: 1;
+  padding-left: 10px;
+}
+#cdv-outline .cdv-outline-group-header .cdv-outline-item.level-3 { padding-left: 20px; }
+#cdv-outline .cdv-outline-group-header .cdv-outline-item.level-4 { padding-left: 28px; }
 #cdv-outline .cdv-outline-item:hover {
   background: rgba(255,255,255,0.08);
   color: #ffffff;
@@ -181,6 +222,13 @@ body:not(.cdv-has-topbar) #cdv-outline { top: 72px; }
   border-left-color: var(--cdv-accent);
   color: var(--cdv-accent);
   background: rgba(106,166,255,0.15);
+}
+#cdv-outline .cdv-outline-group.collapsed > .cdv-outline-children {
+  display: none;
+}
+#cdv-outline .cdv-outline-children {
+  display: flex;
+  flex-direction: column;
 }
 body.cdv-chat-open #cdv-outline { right: 412px; }
 .cdv-focus #cdv-outline { display: none !important; }

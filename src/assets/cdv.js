@@ -73,7 +73,14 @@
     })();
 
     var CDV_REFRESH_QUICK = function(){};
-    var CDV_OUTLINE_STATE = { items: [], linkMap: Object.create(null), activeId: null };
+    var CDV_OUTLINE_STATE = {
+      items: [],
+      linkMap: Object.create(null),
+      activeId: null,
+      parentMap: Object.create(null),
+      groupMap: Object.create(null),
+      expandedMap: null
+    };
 
     // Create top bar
     if (!CDV_FLAGS.noTop && !document.getElementById('cdv-topbar')) {
@@ -706,32 +713,27 @@
         if (!content) return;
         var data = collectOutlineData();
         var map = Object.create(null);
+        var parentMap = Object.create(null);
+        var groupMap = Object.create(null);
         content.innerHTML = '';
         if (!data.length) {
           outline.style.display = 'none';
           CDV_OUTLINE_STATE.items = [];
           CDV_OUTLINE_STATE.linkMap = map;
           CDV_OUTLINE_STATE.activeId = null;
+          CDV_OUTLINE_STATE.parentMap = parentMap;
+          CDV_OUTLINE_STATE.groupMap = groupMap;
           CDV_REFRESH_QUICK();
           return;
         }
         outline.style.display = '';
-        var frag = document.createDocumentFragment();
-        data.forEach(function(item){
-          var level = item.level;
-          if (level < 2) level = 2;
-          if (level > 4) level = 4;
-          var link = document.createElement('a');
-          link.className = 'cdv-outline-item level-' + level;
-          link.textContent = item.title;
-          link.href = '#' + item.id;
-          link.addEventListener('click', function(ev){ ev.preventDefault(); navigateToId(item.id); });
-          map[item.id] = link;
-          frag.appendChild(link);
-        });
-        content.appendChild(frag);
+        var tree = buildOutlineTree(data, parentMap);
+        var expanded = getOutlineExpandedState();
+        renderOutlineTree(tree, content, map, groupMap, expanded);
         CDV_OUTLINE_STATE.items = data;
         CDV_OUTLINE_STATE.linkMap = map;
+        CDV_OUTLINE_STATE.parentMap = parentMap;
+        CDV_OUTLINE_STATE.groupMap = groupMap;
         refreshOutlineActive(true);
         CDV_REFRESH_QUICK();
       } catch(_) {}
@@ -762,6 +764,7 @@
           var link = map[key];
           if (link && link.classList) link.classList.toggle('active', key === current.id);
         }
+        ensureOutlineAncestorsExpanded(current.id);
       } catch(_) {}
     }
 
@@ -796,6 +799,192 @@
       window.addEventListener('hashchange', function(){ refreshOutlineActive(true); });
       window.addEventListener('load', function(){ refreshOutlineActive(true); });
       setTimeout(function(){ refreshOutlineActive(true); }, 200);
+    }
+
+    function buildOutlineTree(items, parentMap) {
+      var roots = [];
+      var stack = [];
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var level = item.level;
+        if (level < 2) level = 2;
+        if (level > 4) level = 4;
+        item.level = level;
+        var node = { item: item, children: [] };
+        while (stack.length && level <= stack[stack.length - 1].item.level) {
+          stack.pop();
+        }
+        if (stack.length) {
+          stack[stack.length - 1].children.push(node);
+          parentMap[item.id] = stack[stack.length - 1].item.id;
+        } else {
+          roots.push(node);
+        }
+        stack.push(node);
+      }
+      return roots;
+    }
+
+    function renderOutlineTree(nodes, container, linkMap, groupMap, expandedState) {
+      var frag = document.createDocumentFragment();
+      nodes.forEach(function(node){
+        var level = node.item.level;
+        var hasChildren = node.children && node.children.length;
+        if (hasChildren) {
+          var group = document.createElement('div');
+          group.className = 'cdv-outline-group level-' + level;
+          var expanded = isOutlineExpanded(expandedState, node.item.id);
+          if (expanded) {
+            group.classList.add('expanded');
+          } else {
+            group.classList.add('collapsed');
+          }
+          var header = document.createElement('div');
+          header.className = 'cdv-outline-group-header';
+          var toggle = document.createElement('button');
+          toggle.className = 'cdv-outline-toggle';
+          toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+          header.appendChild(toggle);
+          var link = document.createElement('a');
+          link.className = 'cdv-outline-item level-' + level;
+          link.textContent = node.item.title;
+          link.href = '#' + node.item.id;
+          link.addEventListener('click', function(ev){
+            ev.preventDefault();
+            if (group.classList.contains('collapsed')) {
+              group.classList.add('expanded');
+              group.classList.remove('collapsed');
+              toggle.setAttribute('aria-expanded', 'true');
+              setOutlineExpanded(expandedState, node.item.id, true);
+              saveOutlineExpanded(expandedState);
+            }
+            navigateToId(node.item.id);
+          });
+          header.appendChild(link);
+          group.appendChild(header);
+          var childrenContainer = document.createElement('div');
+          childrenContainer.className = 'cdv-outline-children';
+          renderOutlineTree(node.children, childrenContainer, linkMap, groupMap, expandedState);
+          group.appendChild(childrenContainer);
+          frag.appendChild(group);
+          linkMap[node.item.id] = link;
+          groupMap[node.item.id] = group;
+          toggle.addEventListener('click', function(ev){
+            ev.preventDefault();
+            ev.stopPropagation();
+            var nowExpanded = !group.classList.contains('expanded');
+            group.classList.toggle('expanded', nowExpanded);
+            group.classList.toggle('collapsed', !nowExpanded);
+            toggle.setAttribute('aria-expanded', nowExpanded ? 'true' : 'false');
+            setOutlineExpanded(expandedState, node.item.id, nowExpanded);
+            saveOutlineExpanded(expandedState);
+          });
+        } else {
+          var link = document.createElement('a');
+          link.className = 'cdv-outline-item level-' + level;
+          link.textContent = node.item.title;
+          link.href = '#' + node.item.id;
+          link.addEventListener('click', function(ev){
+            ev.preventDefault();
+            navigateToId(node.item.id);
+          });
+          frag.appendChild(link);
+          linkMap[node.item.id] = link;
+        }
+      });
+      container.appendChild(frag);
+    }
+
+    function outlineExpandStorageKey() {
+      try {
+        var meta = document.querySelector('meta[name=\"rustdoc-vars\"]');
+        var root = (meta && meta.dataset && meta.dataset.rootPath) || './';
+        var crate = (meta && meta.dataset && meta.dataset.currentCrate) || '';
+        return 'cdv.outline.expand::' + root + '::' + crate;
+      } catch(_) {
+        return 'cdv.outline.expand::' + location.pathname;
+      }
+    }
+
+    function loadOutlineExpanded() {
+      var map = Object.create(null);
+      try {
+        var raw = localStorage.getItem(outlineExpandStorageKey());
+        if (!raw) return map;
+        var list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          for (var i = 0; i < list.length; i++) {
+            var id = list[i];
+            if (typeof id === 'string' && id) {
+              map[id] = 1;
+            }
+          }
+        }
+      } catch(_) {}
+      return map;
+    }
+
+    function saveOutlineExpanded(map) {
+      try {
+        var list = [];
+        for (var key in map) {
+          if (Object.prototype.hasOwnProperty.call(map, key)) {
+            list.push(key);
+          }
+        }
+        localStorage.setItem(outlineExpandStorageKey(), JSON.stringify(list));
+      } catch(_) {}
+    }
+
+    function getOutlineExpandedState() {
+      if (!CDV_OUTLINE_STATE.expandedMap) {
+        CDV_OUTLINE_STATE.expandedMap = loadOutlineExpanded();
+      }
+      return CDV_OUTLINE_STATE.expandedMap;
+    }
+
+    function isOutlineExpanded(map, id) {
+      return !!(map && Object.prototype.hasOwnProperty.call(map, id));
+    }
+
+    function setOutlineExpanded(map, id, expanded) {
+      if (!map) return;
+      if (expanded) {
+        map[id] = 1;
+      } else {
+        delete map[id];
+      }
+    }
+
+    function ensureOutlineAncestorsExpanded(id) {
+      try {
+        if (!id) return;
+        var parentMap = CDV_OUTLINE_STATE.parentMap || {};
+        var groupMap = CDV_OUTLINE_STATE.groupMap || {};
+        var expanded = getOutlineExpandedState();
+        var changed = false;
+        var current = parentMap[id];
+        var guard = 0;
+        while (current && guard++ < 32) {
+          if (!isOutlineExpanded(expanded, current)) {
+            setOutlineExpanded(expanded, current, true);
+            changed = true;
+          }
+          var group = groupMap[current];
+          if (group && group.classList) {
+            if (!group.classList.contains('expanded')) {
+              group.classList.add('expanded');
+              group.classList.remove('collapsed');
+              var toggle = group.querySelector('.cdv-outline-toggle');
+              if (toggle) toggle.setAttribute('aria-expanded', 'true');
+            }
+          }
+          current = parentMap[current];
+        }
+        if (changed) {
+          saveOutlineExpanded(expanded);
+        }
+      } catch(_) {}
     }
 
 
