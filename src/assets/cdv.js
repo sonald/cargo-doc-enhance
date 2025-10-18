@@ -665,18 +665,47 @@
       try {
         var main = document.querySelector('main') || document.body;
         if (!main) return [];
-        var nodes = Array.prototype.slice.call(main.querySelectorAll('h1[id], h2[id], h3[id], h4[id]'));
+        var nodes = Array.prototype.slice.call(main.querySelectorAll('h1, h2, h3, h4'));
         var seen = Object.create(null);
         var list = [];
         nodes.forEach(function(node){
-          var id = node.getAttribute('id');
-          if (!id || seen[id]) return;
-          seen[id] = true;
+          var targetId = node.getAttribute('id');
+          var targetElement = node;
+
+          if (!targetId) {
+            var section = node.closest && node.closest('[id]');
+            if (section && section.getAttribute('id')) {
+              targetId = section.getAttribute('id');
+              targetElement = section;
+            }
+          }
+
+          if (!targetId) {
+            var anchor = node.querySelector && node.querySelector('a[href^=\"#\"]');
+            if (anchor) {
+              var href = anchor.getAttribute('href') || '';
+              if (href.charAt(0) === '#') {
+                var candidate = href.slice(1);
+                if (candidate) {
+                  var actual = document.getElementById(candidate);
+                  if (actual) {
+                    targetId = candidate;
+                    targetElement = actual;
+                  } else {
+                    targetId = candidate;
+                  }
+                }
+              }
+            }
+          }
+
+          if (!targetId || seen[targetId]) return;
+          seen[targetId] = true;
           var title = extractHeadingTitle(node);
           if (!title) return;
           var level = parseInt(node.tagName.slice(1), 10);
           if (!level || level < 1) level = 2;
-          list.push({ id: id, title: title, level: level, element: node });
+          list.push({ id: targetId, title: title, level: level, element: targetElement });
         });
         return list;
       } catch(_) { return []; }
