@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bytes = "1.10.1"
-tokio = "1.47.1"
+hyper = { version = "0.14.30", features = ["full"] }
+mime_guess = "2.0.5"
+percent-encoding = "2.3.1"
+tokio = { version = "1.47.1", features = ["fs", "macros", "rt-multi-thread"] }
+tokio-util = { version = "0.7.12", features = ["io"] }

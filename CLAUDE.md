@@ -4,110 +4,80 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-cargo-doc-viewer is a Rust CLI tool that enhances `cargo doc` HTML output by injecting interactive UI components directly into generated HTML files. The entire application is contained in a single `main.rs` file (~1700 lines) that uses primarily the Rust standard library plus the `bytes` crate for efficient string handling.
+`cargo-doc-viewer` is a Rust CLI that enhances `cargo doc` output with an interactive overlay. The default experience now runs a lightweight HTTP server that injects CSS/JS at response time, keeping the generated HTML files untouched. A legacy "enhance" flow is still available when you need to modify files in place for offline distribution.
 
 ## Development Commands
 
-### Building and Testing
-- `cargo build --release` - Build optimized binary
-- `cargo run -- --help` - Show usage options
-- `cargo check` - Quick compilation check (configured in codebuff.json)
+### Building and Checking
+- `cargo fmt` – format before committing
+- `cargo check` – fast correctness gate during edits
+- `cargo build --release` – optimized binary
 
 ### Running the Tool
-- `cargo run --` - Enhance docs in default `target/doc` directory
-- `cargo run -- --doc-dir path/to/docs` - Enhance custom doc directory  
-- `cargo run -- --revert` - Remove previously injected enhancements
+- `cargo run --` / `cargo run -- serve` – serve docs from `target/doc` at `http://127.0.0.1:7878`
+- `cargo run -- serve --addr 127.0.0.1:4200` – custom bind address
+- `cargo run -- enhance --doc-dir path/to/docs` – static injection
+- `cargo run -- revert --doc-dir path/to/docs` – remove injected assets
 
-### Development Workflow
-1. Generate documentation: `cargo doc`
-2. Enhance the docs: `cargo run --`
-3. Open enhanced docs: `target/doc/<crate>/index.html`
+### Suggested Workflow
+1. `cargo doc` – generate documentation under `target/doc`
+2. `cargo run --` – launch the runtime server
+3. Open the printed URL in a browser to verify enhancements
+4. Optionally run `cargo run -- enhance` / `cargo run -- revert` to test legacy flows
 
 ## Architecture
 
-### Core Design Principles
-- **Post-processing approach**: Modifies existing rustdoc HTML in-place rather than serving custom content
-- **Idempotent injection**: Uses `<!-- CDV: injected -->` markers to safely run multiple times
-- **Minimal dependencies**: Uses primarily Rust std + bytes crate for reliability and offline builds
-- **File-based operation**: No servers, works with static HTML files
+### Module Layout (src/)
+- `main.rs` – CLI entrypoint; dispatches to serve/enhance/revert modes
+- `cli.rs` – manual argument parsing and defaulting logic
+- `assets.rs` – embeds `src/assets/cdv.css` and `src/assets/cdv.js`
+- `injector.rs` – pure functions for injecting/removing assets from HTML
+- `overview.rs` – scans doc directories and renders the crate overview page
+- `enhance.rs` – filesystem walker used by enhance/revert flows
+- `server.rs` – Hyper-based HTTP server that performs runtime injection
 
-### Main Components
+### Runtime Serve Pipeline
+1. Resolve the request path within the doc root (guards against traversal)
+2. Stream non-HTML assets directly
+3. For `.html`, read content and call `injector::inject` before responding
+4. `/` and `/cdv-crate-overview.html` render the overview via `overview::scan_crates`
 
-**File Processing Pipeline** (`main.rs`):
-- `walk_and_process()`: Recursively walks directory tree looking for `.html` files
-- `should_skip_file()`: Skips rustdoc special files (search.html, settings.html, source-src.html)
-- `inject_file()`: Injects CSS and JavaScript into `<head>` and before `</body>`
-- `revert_file()`: Removes injected content by finding and removing marked blocks
+### Static Enhance/Revert
+- `enhance::enhance_dir` walks all HTML files, skipping rustdoc internals
+- Writes `<!-- CDV: injected -->`, `<style id="cdv-style">`, and `<script id="cdv-script">`
+- `overview::generate_overview_page` persists `cdv-crate-overview.html`
+- `enhance::revert_dir` removes the markers and calls `overview::remove_overview_page`
 
-**UI Enhancement Assets**:
-- `CDV_CSS`: Complete stylesheet for top bar, chat panel, symbols list, and responsive features
-- `CDV_JS`: JavaScript that creates and manages all interactive UI components
-
-### JavaScript Architecture
-
-The injected JavaScript creates several independent systems:
-
-1. **Top Navigation Bar**: Fixed search bar with rustdoc search integration, function dropdown, filters
-2. **Search Enhancements**: History persistence, filter popover for result types
-3. **Symbol Navigation**: Categorized list of page symbols (methods, traits, functions, etc.)
-4. **Chat Panel**: Simple LLM-style interface with text retrieval from current page
-5. **UX Improvements**: Copy buttons, anchor highlighting, keyboard navigation, focus mode
-
-## File Structure
-
-- `src/main.rs`: Complete application in single file
-- `Cargo.toml`: Minimal dependencies (`bytes = "1.10.1"`, `tokio` listed but unused)
-- `README.md`: User-facing documentation and feature overview
-
-## Key Implementation Details
-
-### HTML Injection Strategy
-- Searches for `</head>` and `</body>` tags as injection points
-- CSS goes in head, JavaScript goes before body close
-- Uses unique IDs (`cdv-style`, `cdv-script`) for clean removal during revert
-- Checks for existing markers to prevent double-injection
-
-### UI Localization
-- All UI strings are in Chinese for better localization
-- Symbol categories use Chinese terms: 方法 (methods), Trait 方法 (trait methods), etc.
-- Fallback to English for technical terms and edge cases
-
-### Browser Compatibility
-- Includes shim for file:// protocol locale issues in rustdoc
-- Works without network connectivity
-- Progressive enhancement - degrades gracefully if features fail
-
-### Data Persistence
-- Uses localStorage for search history, filter preferences, focus mode state  
-- Keys are scoped by documentation root path and crate name
-- Handles localStorage failures gracefully
+### JavaScript & UI Systems
+The JS bundle (`src/assets/cdv.js`) still powers:
+1. Top navigation bar + rustdoc search integration
+2. Search filters and quick-search palette
+3. Symbols list and breadcrumbs UI
+4. Chat panel shell with local heuristics
+5. Focus mode, copy buttons, anchor highlighting, etc.
 
 ## Extending the Tool
 
-### Modifying UI Components
-- Edit `CDV_CSS` constant for styling changes
-- Edit `CDV_JS` constant for functionality changes
-- Both assets are embedded as string literals in main.rs
+### Modifying UI Assets
+- Update `src/assets/cdv.css` for styling
+- Update `src/assets/cdv.js` for behaviors
+- Rust-side logic (injection points, runtime routes) lives in `injector.rs` and `server.rs`
 
-### Adding New Features  
-- Follow the existing pattern of self-contained JavaScript modules
-- Use feature flags (CDV_FLAGS) for optional components
-- Implement graceful fallbacks for feature detection
+### Adding New Features
+- Prefer new helper modules instead of growing `main.rs`
+- For runtime features, add routes or middleware in `server.rs`
+- For static mode, extend `enhance::process_dir` with clear branching
+- Document any new UX behavior in `README.md` and here
 
 ### Chat Integration
-The chat system currently uses simple text retrieval. To integrate with real LLM backends:
-1. Modify the `answer()` function in the chat setup code
-2. Replace text snippet matching with API calls to your service
-3. Handle CORS requirements for static file serving
+To replace the placeholder chat behavior:
+1. Extend the JS bundle with real API calls
+2. Expose configuration in Rust (e.g., via query params or injected data attributes)
+3. Handle offline mode gracefully – the binary should still operate without network access
 
-## Testing Your Changes
-
-1. Make changes to CSS/JS constants in main.rs
-2. Test with a real cargo doc output:
-   ```
-   cargo doc  # Generate test documentation
-   cargo run -- # Apply your changes
-   open target/doc/cargo_doc_viewer/index.html  # Verify results
-   ```
-3. Test revert functionality: `cargo run -- --revert`
-4. Verify idempotent behavior by running enhancement twice
+## Testing Changes
+1. Run `cargo check` after Rust edits
+2. `cargo doc` then `cargo run --` to validate runtime injection
+3. Inspect the browser console for JS errors
+4. `cargo run -- enhance` followed by `cargo run -- revert` to ensure legacy idempotency
+5. Consider adding unit tests (`injector.rs`, `overview.rs`) when changing parsing heuristics

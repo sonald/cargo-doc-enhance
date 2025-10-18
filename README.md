@@ -61,54 +61,60 @@ cargo install --path .
    cargo doc
    ```
 
-2. **增强文档** Enhance documentation:
+2. **启动运行时服务** Start the runtime server (默认行为 Default):
    ```bash
    cargo-doc-viewer
-   # 或者指定文档目录
-   cargo-doc-viewer --doc-dir target/doc
+   # 自定义监听地址和端口
+   cargo-doc-viewer serve --addr 127.0.0.1:4200
    ```
+   浏览器打开 `http://127.0.0.1:7878/` 即可查看增强后的文档；所有 HTML 在响应阶段注入，无需写回磁盘。
 
-3. **打开增强后的文档** Open enhanced documentation:
+3. **可选：静态注入** Optional static enhance:
    ```bash
-   open target/doc/your_crate/index.html
+   cargo-doc-viewer enhance --doc-dir target/doc
    ```
+   该模式会直接修改 HTML 文件，并生成 `cdv-crate-overview.html` 便于离线浏览。
 
 4. **撤销增强** Revert enhancements:
    ```bash
-   cargo-doc-viewer --revert
+   cargo-doc-viewer revert --doc-dir target/doc
    ```
 
 ### 命令行选项 Command Line Options
 
 ```
-cargo-doc-viewer [enhance] [-d|--doc-dir <path>] [--revert]
+cargo-doc-viewer [serve] [-d|--doc-dir <path>] [--addr <ip:port>] [--port <port>]
+cargo-doc-viewer enhance [-d|--doc-dir <path>]
+cargo-doc-viewer revert [-d|--doc-dir <path>]
 
 OPTIONS:
     -d, --doc-dir <path>    指定文档目录 (默认: target/doc)
-    --revert               移除之前注入的增强功能
-    -h, --help             显示帮助信息
+    --addr <ip:port>        运行时模式监听地址 (默认: 127.0.0.1:7878)
+    --port <port>           快速指定端口，等价于 --addr 127.0.0.1:<port>
+    -h, --help              显示帮助信息
 
 EXAMPLES:
-    cargo doc && cargo-doc-viewer
-    cargo-doc-viewer --doc-dir custom/doc/path
-    cargo-doc-viewer --revert --doc-dir target/doc
+    cargo doc && cargo-doc-viewer          # 启动本地服务
+    cargo-doc-viewer serve --port 4200     # 指定端口
+    cargo-doc-viewer enhance --doc-dir target/doc
+    cargo-doc-viewer revert --doc-dir target/doc
 ```
 
 ## 🛠️ 工作原理 How It Works
 
-cargo-doc-viewer 采用**后处理方法**，直接修改 rustdoc 生成的 HTML 文件：
+默认的 **serve 模式** 通过本地 HTTP 服务在“响应阶段”注入增强组件：
 
-1. **扫描 HTML 文件** - 递归遍历文档目录，查找所有 `.html` 文件
-2. **注入 CSS/JS** - 在 `<head>` 中注入样式，在 `</body>` 前注入 JavaScript
-3. **添加标记** - 使用 `<!-- CDV: injected -->` 标记确保幂等性
-4. **保持兼容** - 完全兼容原生 rustdoc 功能，只是增强用户体验
+1. **请求拦截** - 捕获对 `.html` 文件的访问，对静态资源直接透传
+2. **运行时注入** - 在返回内容前插入 CSS/JS，不对磁盘文件做任何修改
+3. **概览页面** - `/cdv-crate-overview.html` 动态扫描 `doc` 目录并实时渲染
+4. **可选静态模式** - `enhance` 子命令仍可就地改写 HTML，并写入标记便于 `revert`
 
 ### 架构特点 Architecture Features
 
-- ✅ **文件就地修改** - 直接修改现有 HTML，无需额外服务器
-- ✅ **标记系统** - 智能检测已注入内容，避免重复注入
-- ✅ **最小依赖** - 主要使用 Rust 标准库 + bytes crate
-- ✅ **离线运行** - 所有功能都在本地运行，无需网络
+- ✅ **非侵入式** - 默认运行时注入，可随时重新生成文档无需二次处理
+- ✅ **虚拟概览** - 概览页面按需生成，无需写入额外文件
+- ✅ **老模式兼容** - 静态增强与撤销流程保持可用，方便离线分享
+- ✅ **自包含资产** - CSS/JS 存放在 `src/assets/`，编译时嵌入二进制
 
 ## 🎯 使用场景 Use Cases
 
@@ -171,18 +177,19 @@ cargo check
 
 # 测试修改
 cargo doc  # 生成测试文档
-cargo run -- # 应用你的修改
-open target/doc/cargo_doc_viewer/index.html  # 验证结果
+cargo run --  # 默认启动 serve 模式
+# 浏览器访问 http://127.0.0.1:7878 查看效果
 
 # 测试撤销功能
-cargo run -- --revert
+cargo run -- revert
 ```
 
 ### 修改 UI 组件 Modifying UI Components
 
-- **样式修改** - 编辑 `main.rs` 中的 `CDV_CSS` 常量
-- **功能修改** - 编辑 `main.rs` 中的 `CDV_JS` 常量
-- **新增功能** - 遵循现有的自包含 JavaScript 模块模式
+- **样式修改** - 编辑 `src/assets/cdv.css`
+- **功能修改** - 编辑 `src/assets/cdv.js`
+- **注入逻辑** - 在 `src/injector.rs` 中调整 Rust 侧的 HTML 处理
+- **运行时服务** - 修改 `src/server.rs` 自定义路由或缓存策略
 
 ### 提交指南 Contribution Guidelines
 
