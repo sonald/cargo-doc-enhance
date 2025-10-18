@@ -862,12 +862,9 @@
         if (hasChildren) {
           var group = document.createElement('div');
           group.className = 'cdv-outline-group level-' + level;
+          group.dataset.outlineId = node.item.id;
+          group.dataset.outlineLevel = String(level);
           var expanded = isOutlineExpanded(expandedState, node.item.id);
-          if (expanded) {
-            group.classList.add('expanded');
-          } else {
-            group.classList.add('collapsed');
-          }
           var header = document.createElement('div');
           header.className = 'cdv-outline-group-header';
           var toggle = document.createElement('button');
@@ -878,17 +875,6 @@
           link.className = 'cdv-outline-item level-' + level;
           link.textContent = node.item.title;
           link.href = '#' + node.item.id;
-          link.addEventListener('click', function(ev){
-            ev.preventDefault();
-            if (group.classList.contains('collapsed')) {
-              group.classList.add('expanded');
-              group.classList.remove('collapsed');
-              toggle.setAttribute('aria-expanded', 'true');
-              setOutlineExpanded(expandedState, node.item.id, true);
-              saveOutlineExpanded(expandedState);
-            }
-            navigateToId(node.item.id);
-          });
           header.appendChild(link);
           group.appendChild(header);
           var childrenContainer = document.createElement('div');
@@ -898,14 +884,23 @@
           frag.appendChild(group);
           linkMap[node.item.id] = link;
           groupMap[node.item.id] = group;
+          applyGroupExpanded(group, node.item.id, expanded, expandedState, level, { persist: false });
+          link.addEventListener('click', function(ev){
+            ev.preventDefault();
+            if (group.classList.contains('collapsed')) {
+              applyGroupExpanded(group, node.item.id, true, expandedState, level, { expandDescendants: true });
+              saveOutlineExpanded(expandedState);
+            }
+            navigateToId(node.item.id);
+          });
           toggle.addEventListener('click', function(ev){
             ev.preventDefault();
             ev.stopPropagation();
             var nowExpanded = !group.classList.contains('expanded');
-            group.classList.toggle('expanded', nowExpanded);
-            group.classList.toggle('collapsed', !nowExpanded);
-            toggle.setAttribute('aria-expanded', nowExpanded ? 'true' : 'false');
-            setOutlineExpanded(expandedState, node.item.id, nowExpanded);
+            applyGroupExpanded(group, node.item.id, nowExpanded, expandedState, level, {
+              expandDescendants: nowExpanded,
+              collapseDescendants: !nowExpanded
+            });
             saveOutlineExpanded(expandedState);
           });
         } else {
@@ -972,6 +967,62 @@
       return CDV_OUTLINE_STATE.expandedMap;
     }
 
+    function outlineLevelFromGroup(group) {
+      if (!group || !group.dataset) return 2;
+      var lvl = parseInt(group.dataset.outlineLevel || '2', 10);
+      if (!isFinite(lvl)) lvl = 2;
+      if (lvl < 2) lvl = 2;
+      if (lvl > 4) lvl = 4;
+      return lvl;
+    }
+
+    function applyGroupExpanded(group, id, expanded, state, level, opts) {
+      opts = opts || {};
+      group.classList.toggle('expanded', !!expanded);
+      group.classList.toggle('collapsed', !expanded);
+      var toggle = group.querySelector(':scope > .cdv-outline-group-header .cdv-outline-toggle');
+      if (toggle) {
+        toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      }
+      if (opts.persist !== false && id) {
+        setOutlineExpanded(state, id, !!expanded);
+      }
+      if (expanded && opts.expandDescendants) {
+        autoExpandChildren(group, state, level <= 2 ? 2 : 1);
+      } else if (!expanded && opts.collapseDescendants) {
+        collapseDescendants(group, state);
+      }
+    }
+
+    function autoExpandChildren(group, state, depth) {
+      if (!depth || depth <= 0) return;
+      var children = Array.prototype.slice.call(
+        group.querySelectorAll(':scope > .cdv-outline-children > .cdv-outline-group')
+      );
+      children.forEach(function(child){
+        var childId = child.dataset && child.dataset.outlineId;
+        var childLevel = outlineLevelFromGroup(child);
+        applyGroupExpanded(child, childId, true, state, childLevel, {
+          expandDescendants: depth > 1,
+          collapseDescendants: false
+        });
+      });
+    }
+
+    function collapseDescendants(group, state) {
+      var descendants = Array.prototype.slice.call(group.querySelectorAll('.cdv-outline-group'));
+      descendants.forEach(function(child){
+        var childId = child.dataset && child.dataset.outlineId;
+        child.classList.remove('expanded');
+        child.classList.add('collapsed');
+        var toggle = child.querySelector(':scope > .cdv-outline-group-header .cdv-outline-toggle');
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
+        if (childId) {
+          setOutlineExpanded(state, childId, false);
+        }
+      });
+    }
+
     function isOutlineExpanded(map, id) {
       return !!(map && Object.prototype.hasOwnProperty.call(map, id));
     }
@@ -995,18 +1046,11 @@
         var current = parentMap[id];
         var guard = 0;
         while (current && guard++ < 32) {
-          if (!isOutlineExpanded(expanded, current)) {
-            setOutlineExpanded(expanded, current, true);
-            changed = true;
-          }
           var group = groupMap[current];
-          if (group && group.classList) {
-            if (!group.classList.contains('expanded')) {
-              group.classList.add('expanded');
-              group.classList.remove('collapsed');
-              var toggle = group.querySelector('.cdv-outline-toggle');
-              if (toggle) toggle.setAttribute('aria-expanded', 'true');
-            }
+          if (!group) break;
+          if (!group.classList.contains('expanded')) {
+            applyGroupExpanded(group, current, true, expanded, outlineLevelFromGroup(group), { expandDescendants: true });
+            changed = true;
           }
           current = parentMap[current];
         }
