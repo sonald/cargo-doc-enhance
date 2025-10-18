@@ -33,13 +33,7 @@ async fn run() -> Result<(), i32> {
             Ok(())
         }
         Parsed::Command(options) => {
-            if !options.doc_dir.exists() {
-                eprintln!(
-                    "Doc directory not found: {}\nHint: run `cargo doc` first or pass --doc-dir",
-                    options.doc_dir.display()
-                );
-                return Err(1);
-            }
+            ensure_doc_dir(&options)?;
 
             match options.command {
                 Command::Serve { addr } => match server::run(&options.doc_dir, addr).await {
@@ -92,6 +86,76 @@ async fn run() -> Result<(), i32> {
                     }
                 },
             }
+        }
+    }
+}
+
+fn ensure_doc_dir(options: &cli::CliOptions) -> Result<(), i32> {
+    if options.doc_dir.exists() {
+        return Ok(());
+    }
+
+    if should_generate_docs(options) {
+        match generate_docs() {
+            Ok(()) => {
+                if options.doc_dir.exists() {
+                    return Ok(());
+                }
+            }
+            Err(code) => return Err(code),
+        }
+    }
+
+    eprintln!(
+        "Doc directory not found: {}\nHint: run `cargo doc` first or pass --doc-dir",
+        options.doc_dir.display()
+    );
+    Err(1)
+}
+
+fn should_generate_docs(options: &cli::CliOptions) -> bool {
+    !options.doc_dir_was_provided
+        && matches!(options.command, Command::Serve { .. })
+        && is_rust_project_root()
+}
+
+fn is_rust_project_root() -> bool {
+    match env::current_dir() {
+        Ok(dir) => dir.join("Cargo.toml").is_file(),
+        Err(_) => false,
+    }
+}
+
+fn generate_docs() -> Result<(), i32> {
+    let dir = match env::current_dir() {
+        Ok(dir) => dir,
+        Err(err) => {
+            eprintln!("Unable to determine current directory: {err}");
+            return Err(1);
+        }
+    };
+
+    println!(
+        "Doc directory not found; running `cargo doc` in {}...",
+        dir.display()
+    );
+
+    match std::process::Command::new("cargo")
+        .arg("doc")
+        .current_dir(&dir)
+        .status()
+    {
+        Ok(status) if status.success() => {
+            println!("`cargo doc` completed successfully.");
+            Ok(())
+        }
+        Ok(status) => {
+            eprintln!("`cargo doc` failed with status: {status}");
+            Err(1)
+        }
+        Err(err) => {
+            eprintln!("Failed to run `cargo doc`: {err}");
+            Err(1)
         }
     }
 }

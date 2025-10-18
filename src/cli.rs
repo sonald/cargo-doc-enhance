@@ -12,6 +12,7 @@ pub enum Parsed {
 #[derive(Debug)]
 pub struct CliOptions {
     pub doc_dir: PathBuf,
+    pub doc_dir_was_provided: bool,
     pub command: Command,
 }
 
@@ -41,6 +42,7 @@ where
 {
     let mut args = args.into_iter().skip(1);
     let mut doc_dir: Option<PathBuf> = None;
+    let mut doc_dir_was_provided = false;
     let mut mode: Option<Mode> = None;
     let mut addr: Option<SocketAddr> = None;
     let mut port: Option<u16> = None;
@@ -53,6 +55,7 @@ where
                     .next()
                     .ok_or_else(|| CliError::new("--doc-dir requires a value"))?;
                 doc_dir = Some(PathBuf::from(value));
+                doc_dir_was_provided = true;
             }
             "--port" => {
                 let value = args
@@ -98,13 +101,13 @@ where
         }
     }
 
-    let doc_dir = match doc_dir {
-        Some(path) => path,
+    let (doc_dir, doc_dir_was_provided) = match doc_dir {
+        Some(path) => (path, doc_dir_was_provided),
         None => {
             let cwd = env::current_dir().map_err(|e| {
                 CliError::new(format!("unable to determine current directory: {e}"))
             })?;
-            cwd.join("target/doc")
+            (cwd.join("target/doc"), false)
         }
     };
 
@@ -115,6 +118,7 @@ where
             let addr = finalize_addr(addr, port)?;
             Ok(Parsed::Command(CliOptions {
                 doc_dir,
+                doc_dir_was_provided,
                 command: Command::Serve { addr },
             }))
         }
@@ -126,6 +130,7 @@ where
             }
             Ok(Parsed::Command(CliOptions {
                 doc_dir,
+                doc_dir_was_provided,
                 command: Command::Enhance,
             }))
         }
@@ -137,6 +142,7 @@ where
             }
             Ok(Parsed::Command(CliOptions {
                 doc_dir,
+                doc_dir_was_provided,
                 command: Command::Revert,
             }))
         }

@@ -69,6 +69,8 @@ cargo install --path .
    cargo-doc-viewer serve --addr 127.0.0.1:4200
    ```
    浏览器打开 `http://127.0.0.1:7878/` 即可查看增强后的文档；所有 HTML 在响应阶段注入，无需写回磁盘。
+   默认在工程根目录运行时，如果尚未生成文档，工具会自动执行 `cargo doc` 并在完成后启动服务。\
+   When invoked from the project root without an explicit `--doc-dir`, the tool now runs `cargo doc` automatically before serving when no documentation is present.
 
 3. **可选：静态注入** Optional static enhance:
    ```bash
