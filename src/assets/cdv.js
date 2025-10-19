@@ -2600,6 +2600,7 @@
           setPending(false);
           state.abort = null;
           updateContextPreview();
+          clearSelectionSnippet();
         });
       }
 
