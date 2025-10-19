@@ -18,7 +18,13 @@ async fn main() {
 }
 
 async fn run() -> Result<(), i32> {
-    let parsed = match cli::parse(env::args()) {
+    let mut args: Vec<String> = env::args().collect();
+    if let Some(first) = args.get(1) {
+        if first == "doc-viewer" {
+            args.remove(1);
+        }
+    }
+    let parsed = match cli::parse(args.into_iter()) {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("{err}");
