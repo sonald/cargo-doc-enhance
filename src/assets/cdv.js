@@ -609,6 +609,7 @@
       var panel = document.createElement('div');
       panel.id = 'cdv-chat-panel';
       panel.innerHTML = '' +
+        '<div id="cdv-chat-resizer" title="拖动调整宽度"></div>' +
         '<div id="cdv-chat-header">' +
           '<div class="cdv-chat-title">' +
             '<span class="cdv-chat-name">AI Chart</span>' +
@@ -2117,9 +2118,11 @@
       var STORAGE_KEYS = {
         apiKey: 'cdv.ai.api_key',
         model: 'cdv.ai.model',
-        systemPrompt: 'cdv.ai.system_prompt'
+        systemPrompt: 'cdv.ai.system_prompt',
+        panelWidth: 'cdv.ai.panel_width'
       };
       var TOTAL_TOKEN_BUDGET = 6000;
+      var DEFAULT_CHAT_WIDTH = 420;
       var DEFAULT_CONFIG = {
         api: {
           base_url: 'https://api.openai.com/v1',
@@ -2157,6 +2160,7 @@
         cancelBtn: null,
         contextToggle: null,
         closeBtn: null,
+        resizer: null,
         selectionChip: null,
         envPreview: null,
         selectionPreview: null,
@@ -2220,6 +2224,7 @@
       function createInitialState() {
         var cfg = normalizeConfig(CDV_BOOTSTRAP.config || {});
         var defaults = normalizeConfig(null);
+        var storedWidth = parseFloat(loadFromStorage(STORAGE_KEYS.panelWidth) || '');
         var st = {
           config: cfg,
           defaults: defaults,
@@ -2229,6 +2234,7 @@
           abort: null,
           history: [],
           selectionSnippet: null,
+          panelWidth: clampPanelWidth(storedWidth),
           summary: '',
           tokens: {
             total: 0,
@@ -2273,11 +2279,13 @@
         dom.selectionChip = document.getElementById('cdv-chat-selection-chip');
         if (!dom.sendBtn || !dom.input || !dom.messages || !dom.panel) return;
 
+        applyPanelWidth(state.panelWidth, { persist: false });
         buildContextPanel();
         updateSelectionDisplays();
         updateModelLabel();
         updateContextVisibility();
         attachEvents();
+        setupResizer();
         autoResizeTextarea(dom.input);
         state.summary = buildSummaryText();
         updateContextPreview();
@@ -2322,6 +2330,59 @@
         if (dom.contextToggle) {
           dom.contextToggle.classList.toggle('active', state.contextOpen);
         }
+      }
+
+      function applyPanelWidth(width, opts) {
+        var clamped = clampPanelWidth(width);
+        state.panelWidth = clamped;
+        document.documentElement.style.setProperty('--cdv-chat-width', clamped + 'px');
+        if (dom.panel) {
+          dom.panel.style.width = clamped + 'px';
+        }
+        if (!opts || opts.persist !== false) {
+          saveToStorage(STORAGE_KEYS.panelWidth, String(clamped));
+        }
+      }
+
+      function setupResizer() {
+        dom.resizer = document.getElementById('cdv-chat-resizer');
+        if (!dom.resizer) return;
+        var dragging = false;
+        var startX = 0;
+        var startWidth = state.panelWidth;
+        var prevUserSelect = '';
+
+        function onMove(ev) {
+          if (!dragging) return;
+          ev.preventDefault();
+          var delta = startX - ev.clientX;
+          var next = clampPanelWidth(startWidth + delta);
+          applyPanelWidth(next, { persist: false });
+        }
+
+        function onUp(ev) {
+          if (!dragging) return;
+          ev.preventDefault();
+          dragging = false;
+          document.removeEventListener('mousemove', onMove, true);
+          document.removeEventListener('mouseup', onUp, true);
+          document.body.classList.remove('cdv-resizing');
+          document.body.style.userSelect = prevUserSelect;
+          applyPanelWidth(state.panelWidth);
+        }
+
+        dom.resizer.addEventListener('mousedown', function(ev){
+          if (ev.button !== 0) return;
+          ev.preventDefault();
+          dragging = true;
+          startX = ev.clientX;
+          startWidth = state.panelWidth;
+          prevUserSelect = document.body.style.userSelect;
+          document.body.style.userSelect = 'none';
+          document.body.classList.add('cdv-resizing');
+          document.addEventListener('mousemove', onMove, true);
+          document.addEventListener('mouseup', onUp, true);
+        });
       }
 
       function buildContextPanel() {
@@ -3183,6 +3244,16 @@
 
       function escapeAttr(value) {
         return escapeHtml(value);
+      }
+
+      function clampPanelWidth(value) {
+        var min = 320;
+        var max = 820;
+        var width = Number(value);
+        if (!isFinite(width) || width <= 0) width = DEFAULT_CHAT_WIDTH;
+        if (width < min) width = min;
+        if (width > max) width = max;
+        return Math.round(width);
       }
 
       function saveSystemPromptOverride(value) {
