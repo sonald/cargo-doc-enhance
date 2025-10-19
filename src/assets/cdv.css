@@ -61,6 +61,35 @@ body.cdv-has-topbar { padding-top: 56px !important; }
   border-color: transparent;
   box-shadow: 0 0 0 2px rgba(106,166,255,0.35);
 }
+#cdv-anchor-history {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 8px;
+}
+#cdv-anchor-history button {
+  height: 30px;
+  width: 36px;
+  border-radius: 6px;
+  border: 1px solid var(--cdv-border);
+  background: rgba(255,255,255,0.05);
+  color: var(--cdv-fg);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+#cdv-anchor-history button:hover {
+  border-color: rgba(255,255,255,0.35);
+}
+#cdv-anchor-history button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: rgba(255,255,255,0.12);
+}
 #cdv-focus-width-control {
   display: none;
   align-items: center;

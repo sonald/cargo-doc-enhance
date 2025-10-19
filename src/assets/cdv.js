@@ -82,6 +82,139 @@
       expandedMap: null
     };
 
+    var CDV_ANCHOR_HISTORY = (function(){
+      var entries = [];
+      var index = -1;
+      var maxEntries = 80;
+      var backBtn = null;
+      var forwardBtn = null;
+      var suppressHash = false;
+      var initialized = false;
+
+      function ensureButtons() {
+        var maybeBack = document.getElementById('cdv-anchor-back');
+        var maybeForward = document.getElementById('cdv-anchor-forward');
+        if (maybeBack && maybeBack !== backBtn) {
+          backBtn = maybeBack;
+          if (!backBtn.__cdvAnchorInit) {
+            backBtn.__cdvAnchorInit = true;
+            backBtn.addEventListener('click', function(ev){
+              ev.preventDefault();
+              go(-1);
+            });
+          }
+        }
+        if (maybeForward && maybeForward !== forwardBtn) {
+          forwardBtn = maybeForward;
+          if (!forwardBtn.__cdvAnchorInit) {
+            forwardBtn.__cdvAnchorInit = true;
+            forwardBtn.addEventListener('click', function(ev){
+              ev.preventDefault();
+              go(1);
+            });
+          }
+        }
+      }
+
+      function updateButtons() {
+        ensureButtons();
+        var canBack = index > 0;
+        var canForward = index >= 0 && index < entries.length - 1;
+        if (backBtn) {
+          backBtn.disabled = !canBack;
+        }
+        if (forwardBtn) {
+          forwardBtn.disabled = !canForward;
+        }
+      }
+
+      function push(id) {
+        if (!id) return;
+        if (index >= 0 && entries[index] === id) {
+          updateButtons();
+          return;
+        }
+        if (index < entries.length - 1) {
+          entries.splice(index + 1);
+        }
+        entries.push(id);
+        if (entries.length > maxEntries) {
+          entries.splice(0, entries.length - maxEntries);
+        }
+        index = entries.length - 1;
+        updateButtons();
+      }
+
+      function go(delta) {
+        if (!entries.length) return;
+        var next = index + delta;
+        if (next < 0 || next >= entries.length) return;
+        index = next;
+        updateButtons();
+        var target = entries[index];
+        if (target) {
+          suppressHash = true;
+          navigateToId(target, { skipHistory: true });
+        }
+      }
+
+      function onHashChange() {
+        if (suppressHash) {
+          suppressHash = false;
+          return;
+        }
+        var id = location.hash ? location.hash.slice(1) : '';
+        if (id) {
+          push(id);
+        }
+      }
+
+      function onKeyDown(ev) {
+        if (ev.defaultPrevented) return;
+        var mod = ev.metaKey || ev.ctrlKey;
+        if (!mod) return;
+        var tag = (ev.target && ev.target.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || ev.target && ev.target.isContentEditable) return;
+        if (ev.key === '[' || ev.key === 'ArrowLeft') {
+          ev.preventDefault();
+          go(-1);
+        } else if (ev.key === ']' || ev.key === 'ArrowRight') {
+          ev.preventDefault();
+          go(1);
+        }
+      }
+
+      function init() {
+        if (!initialized) {
+          initialized = true;
+          window.addEventListener('hashchange', onHashChange);
+          document.addEventListener('keydown', onKeyDown, true);
+          if (location.hash) {
+            var id = location.hash.slice(1);
+            if (id) {
+              push(id);
+            }
+          }
+        }
+        updateButtons();
+      }
+
+      return {
+        init: init,
+        record: function(id) {
+          init();
+          if (suppressHash) {
+            suppressHash = false;
+          }
+          push(id);
+        },
+        goBack: function(){ go(-1); },
+        goForward: function(){ go(1); },
+        suppressNextHash: function(){ suppressHash = true; },
+        ensureButtons: function(){ updateButtons(); }
+      };
+    })();
+
     // Create top bar
     if (!CDV_FLAGS.noTop && !document.getElementById('cdv-topbar')) {
       var bar = document.createElement('div');
@@ -95,6 +228,10 @@
           '</div>' +
         '</div>' +
         '<div id="cdv-search-host"></div>' +
+        '<div id="cdv-anchor-history" role="group" aria-label="锚点导航">' +
+          '<button id="cdv-anchor-back" title="上一锚点 (⌘[, Ctrl+[)">←</button>' +
+          '<button id="cdv-anchor-forward" title="下一锚点 (⌘], Ctrl])">→</button>' +
+        '</div>' +
         '<button id="cdv-filter-btn" title="筛选搜索结果">Filter</button>' +
         '<button id="cdv-focus-toggle" title="专注模式">Focus</button>' +
         '<button id="cdv-chat-toggle" title="Ask AI about this page">AI Chat</button>';
@@ -106,6 +243,7 @@
     setupBreadcrumbs();
     setupOutline();
     setupQuickSearch();
+    setupAnchorHistoryControls();
 
     // Home navigation dropdown
     (function setupHome(){
@@ -792,7 +930,14 @@
       } catch(_) {}
     }
 
-    function navigateToId(id) {
+    function setupAnchorHistoryControls() {
+      try {
+        CDV_ANCHOR_HISTORY.init();
+      } catch(_) {}
+    }
+
+    function navigateToId(id, options) {
+      options = options || {};
       try {
         if (!id) return;
         var el = document.getElementById(id);
@@ -802,12 +947,19 @@
           if (history.replaceState) {
             history.replaceState(null, '', '#' + id);
           } else {
+            CDV_ANCHOR_HISTORY.suppressNextHash();
             location.hash = id;
           }
         } catch(_) {
+          CDV_ANCHOR_HISTORY.suppressNextHash();
           location.hash = id;
         }
         highlightAnchorTarget(id);
+        if (!options.skipHistory) {
+          CDV_ANCHOR_HISTORY.record(id);
+        } else {
+          CDV_ANCHOR_HISTORY.ensureButtons();
+        }
       } catch(_) {}
     }
 
