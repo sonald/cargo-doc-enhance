@@ -2131,8 +2131,8 @@
           headers: {}
         },
         prompts: {
-          system: 'You are Cargo Doc Viewer’s AI assistant. Provide clear, concise answers grounded in the supplied Rust documentation context. If the context is insufficient, ask for clarification instead of guessing.',
-          environment_template: 'Crate: {{crate.name}}\nModule: {{page.module_path}}\nRust Edition: {{environment.edition}}\nAvailable Features: {{environment.features}}\n',
+          system: 'You are Cargo Doc Viewer’s AI assistant. Answer with concise, well-structured Markdown. Cite relevant context from the supplied documentation and ask for clarification when details are missing. Use code fences for Rust snippets.',
+          environment_template: '',
           fallback_language: 'auto'
         },
         context: {
@@ -2697,7 +2697,10 @@
             features: features,
             location: meta.location,
             language: meta.language,
-            title: meta.title
+            title: meta.title,
+            item_type: meta.itemType,
+            focus_mode: meta.focusMode,
+            search_query: meta.searchQuery
           },
           tokens: tokens
         };
@@ -2733,25 +2736,24 @@
       }
 
       function renderEnvironmentPreview(layers) {
-        var meta = layers.metadata || {};
-        var lines = [];
-        if (meta.crate) {
-          var line = 'Crate: ' + meta.crate;
-          if (meta.crate_version) line += ' v' + meta.crate_version;
-          lines.push(line);
-        }
-        if (meta.module_path) lines.push('Module: ' + meta.module_path);
-        if (meta.title) lines.push('Title: ' + meta.title);
-        if (meta.location) lines.push('Path: ' + meta.location);
-        if (meta.edition) lines.push('Edition: ' + meta.edition);
-        if (meta.features && meta.features.length) lines.push('Features: ' + meta.features.join(', '));
-        lines.push('Language: ' + (meta.language || 'en'));
         if (layers.environment) {
-          lines.push('');
-          lines.push('Template output:');
-          lines.push(layers.environment);
+          return layers.environment;
         }
-        return lines.join('\n');
+        var meta = layers.metadata || {};
+        var features = Array.isArray(meta.features) ? meta.features : (meta.features ? String(meta.features).split(/\s*,\s*/) : []);
+        var context = buildEnvironmentContext({
+          crate: meta.crate,
+          crateVersion: meta.crate_version,
+          modulePath: meta.module_path,
+          title: meta.title,
+          edition: meta.edition,
+          language: meta.language,
+          location: meta.location,
+          itemType: meta.item_type,
+          focusMode: meta.focus_mode === true || meta.focus_mode === 'on',
+          searchQuery: meta.search_query || ''
+        }, features);
+        return context.text;
       }
 
       function copyContext() {
@@ -2834,6 +2836,23 @@
         if (!language && state.config.ui && state.config.ui.language && state.config.ui.language !== 'auto') {
           language = state.config.ui.language;
         }
+        var searchParams = new URLSearchParams(location.search || '');
+        var searchQuery = searchParams.get('search') || searchParams.get('q') || '';
+        var body = document.body || null;
+        var itemType = '';
+        if (body) {
+          itemType = body.getAttribute('data-entity') || body.getAttribute('data-item-type') || body.getAttribute('data-kind') || '';
+          if (!itemType && body.dataset) {
+            itemType = body.dataset.entity || body.dataset.itemType || body.dataset.kind || '';
+          }
+        }
+        var title = document.title || '';
+        if (!itemType && title) {
+          var parts = title.split(' - ');
+          if (parts.length > 1) {
+            itemType = parts[parts.length - 1].toLowerCase();
+          }
+        }
         return {
           crate: ds.currentCrate || ds.crate || ds.rootCrate || '',
           crateVersion: ds.currentVersion || ds.crateVersion || '',
@@ -2841,7 +2860,11 @@
           edition: ds.edition || '',
           language: language || 'en',
           location: (location.pathname || '') + (location.search || '') + (location.hash || ''),
-          title: document.title || ''
+          title: title,
+          itemType: itemType,
+          focusMode: body ? body.classList.contains('cdv-focus') : false,
+          searchQuery: searchQuery,
+          docUrl: location.href
         };
       }
 
@@ -2859,27 +2882,20 @@
             features = attr.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
           }
         }
+        if (features.length) {
+          features = features.filter(function(value, index, arr){
+            return arr.indexOf(value) === index;
+          });
+        }
         return features;
       }
 
       function renderEnvironmentPrompt(template, meta, features) {
-        var ctx = {
-          crate: {
-            name: meta.crate || '(unknown crate)',
-            version: meta.crateVersion || ''
-          },
-          page: {
-            module_path: meta.modulePath || '',
-            title: meta.title || '',
-            location: meta.location || ''
-          },
-          environment: {
-            edition: meta.edition || '',
-            features: features && features.length ? features.join(', ') : 'none',
-            language: meta.language || 'en'
-          }
-        };
-        return renderTemplate(template || DEFAULT_CONFIG.prompts.environment_template, ctx).trim();
+        var context = buildEnvironmentContext(meta, features);
+        if (template && template.trim()) {
+          return renderTemplate(template, context.data).trim();
+        }
+        return context.text;
       }
 
       function renderTemplate(template, context) {
@@ -3203,6 +3219,64 @@
           return '<p>' + renderInline(text) + '</p>';
         }
         return html;
+      }
+
+      function buildEnvironmentContext(meta, features) {
+        var lines = [];
+        var crateLine = (meta.crate || '(unknown crate)');
+        if (meta.crateVersion) crateLine += ' (v' + meta.crateVersion + ')';
+        var modulePath = meta.modulePath ? String(meta.modulePath) : '';
+        var itemType = meta.itemType ? String(meta.itemType) : '';
+        var title = meta.title ? String(meta.title) : '';
+        var edition = meta.edition ? String(meta.edition) : '';
+        var location = meta.location ? String(meta.location) : '(unknown)';
+        var language = meta.language ? String(meta.language) : 'en';
+        var focusMode = !!meta.focusMode;
+        var search = meta.searchQuery ? String(meta.searchQuery).trim() : '';
+        lines.push('- Crate: ' + crateLine);
+        if (modulePath) lines.push('- Module: ' + modulePath);
+        if (itemType) lines.push('- Item: ' + itemType);
+        if (title) lines.push('- Title: ' + title);
+        if (edition) lines.push('- Edition: ' + edition);
+        var featureText = features && features.length ? features.join(', ') : 'none';
+        lines.push('- Enabled features: ' + featureText);
+        lines.push('- Doc path: ' + location);
+        lines.push('- Language: ' + language);
+        lines.push('- UI focus mode: ' + (focusMode ? 'on' : 'off'));
+        if (search) {
+          lines.push('- Search query: ' + search);
+        }
+        var text = 'Context:\n' + lines.join('\n');
+        return {
+          text: text,
+          lines: lines,
+          data: {
+            crate: {
+              name: meta.crate || '(unknown crate)',
+              version: meta.crateVersion || '',
+              display: crateLine
+            },
+            page: {
+              module_path: modulePath,
+              title: title,
+              location: meta.location || '',
+              search_query: search,
+              item_type: itemType
+            },
+            environment: {
+              edition: edition,
+              features: featureText,
+              language: language
+            },
+            ui: {
+              focus_mode: focusMode ? 'on' : 'off'
+            },
+            context: {
+              bullet_list: lines.join('\n'),
+              text: text
+            }
+          }
+        };
       }
 
       function renderInline(text) {
