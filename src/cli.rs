@@ -150,7 +150,7 @@ where
 }
 
 pub fn usage() -> &'static str {
-    "cargo-doc-viewer\n\nUSAGE:\n  cargo-doc-viewer [serve] [-d|--doc-dir <path>] [--addr <ip:port>] [--port <port>]\n  cargo-doc-viewer enhance [-d|--doc-dir <path>]\n  cargo-doc-viewer revert [-d|--doc-dir <path>]\n\nDESCRIPTION:\n  Serve rustdoc HTML with runtime enhancements (default) or statically inject/remove them in place.\n\nEXAMPLES:\n  cargo doc && cargo-doc-viewer\n  cargo-doc-viewer serve --port 4200\n  cargo-doc-viewer enhance --doc-dir target/doc\n  cargo-doc-viewer revert --doc-dir target/doc\n"
+    "cargo-doc-enhance (or via \ncargo doc-enhance)\n\nUSAGE:\n  cargo-doc-enhance [serve] [-d|--doc-dir <path>] [--addr <ip:port>] [--port <port>]\n  cargo-doc-enhance enhance [-d|--doc-dir <path>]\n  cargo-doc-enhance revert [-d|--doc-dir <path>]\n\nDESCRIPTION:\n  Serve rustdoc HTML with runtime enhancements (default) or statically inject/remove them in place.\n\nEXAMPLES:\n  cargo doc && cargo doc-enhance\n  cargo doc-enhance serve --port 4200\n  cargo doc-enhance enhance --doc-dir target/doc\n  cargo doc-enhance revert --doc-dir target/doc\n"
 }
 
 #[derive(Debug, Copy, Clone)]

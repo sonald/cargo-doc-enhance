@@ -20,7 +20,7 @@ async fn main() {
 async fn run() -> Result<(), i32> {
     let mut args: Vec<String> = env::args().collect();
     if let Some(first) = args.get(1) {
-        if first == "doc-viewer" {
+        if first == "doc-enhance" || first == "doc-viewer" {
             args.remove(1);
         }
     }

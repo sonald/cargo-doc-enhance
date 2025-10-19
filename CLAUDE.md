@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`cargo-doc-viewer` is a Rust CLI that enhances `cargo doc` output with an interactive overlay. The default experience now runs a lightweight HTTP server that injects CSS/JS at response time, keeping the generated HTML files untouched. A legacy "enhance" flow is still available when you need to modify files in place for offline distribution.
+`cargo-doc-viewer` ships a `cargo doc-enhance` subcommand that enhances `cargo doc` output with an interactive overlay. The default experience now runs a lightweight HTTP server that injects CSS/JS at response time, keeping the generated HTML files untouched. A legacy "enhance" flow is still available when you need to modify files in place for offline distribution.
 
 ## Development Commands
 
