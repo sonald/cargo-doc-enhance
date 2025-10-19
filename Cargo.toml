@@ -2,6 +2,13 @@
 name = "cargo-doc-viewer"
 version = "0.1.0"
 edition = "2024"
+description = "Enhance rustdoc HTML with a richer UI and AI-assisted chat via cargo doc-enhance."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/your-username/cargo-doc-viewer"
+homepage = "https://github.com/your-username/cargo-doc-viewer"
+readme = "README.md"
+categories = ["development-tools", "development-tools::cargo-plugins"]
+keywords = ["rustdoc", "documentation", "cargo", "chat"]
 
 [dependencies]
 hyper = { version = "0.14.30", features = ["full"] }
