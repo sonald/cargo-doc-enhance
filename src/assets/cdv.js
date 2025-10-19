@@ -2568,13 +2568,12 @@
         if (layers.system) messages.push({ role: 'system', content: layers.system });
         if (layers.environment) messages.push({ role: 'system', content: 'Environment context:\n' + layers.environment });
         if (layers.summary) messages.push({ role: 'system', content: 'Page summary:\n' + layers.summary });
-        if (layers.selection) messages.push({ role: 'system', content: 'User selection:\n' + layers.selection });
         if (layers.history && layers.history.length) {
           layers.history.forEach(function(entry){
             messages.push({ role: entry.role, content: entry.content });
           });
         }
-        messages.push({ role: 'user', content: layers.question || question });
+        messages.push({ role: 'user', content: layers.combined_question || layers.question || question });
         var payload = {
           model: state.config.api.model || DEFAULT_CONFIG.api.model,
           messages: messages,
@@ -2608,17 +2607,21 @@
           systemPrompt = systemPrompt + '\nRespond in ' + fallback + '.';
         }
         systemPrompt = systemPrompt.trim();
+        var combinedQuestion = sanitizedQuestion;
+        if (selectionText) {
+          combinedQuestion = '用户选择了文档中这段话：\n' + selectionText + '\n\n结合这个信息回答下面的问题：\n' + sanitizedQuestion;
+        }
         var tokens = {
           system: systemPrompt ? estimateTokens(systemPrompt) : 0,
           environment: environmentText ? estimateTokens(environmentText) : 0,
           page: summarySanitized ? estimateTokens(summarySanitized) : 0,
           selection: selectionText ? estimateTokens(selectionText) : 0,
           history: historyTokens,
-          user: sanitizedQuestion ? estimateTokens(sanitizedQuestion) : 0,
+          user: combinedQuestion ? estimateTokens(combinedQuestion) : 0,
           budget: TOTAL_TOKEN_BUDGET,
           pageBudget: state.config.context.page_tokens_budget || DEFAULT_CONFIG.context.page_tokens_budget
         };
-        tokens.total = tokens.system + tokens.environment + tokens.page + tokens.selection + tokens.history + tokens.user;
+        tokens.total = tokens.system + tokens.environment + tokens.page + tokens.history + tokens.user;
         return {
           system: systemPrompt,
           environment: environmentText,
@@ -2627,6 +2630,7 @@
           selectionMeta: selection,
           history: historyMessages,
           question: sanitizedQuestion,
+          combined_question: combinedQuestion,
           metadata: {
             crate: meta.crate,
             crate_version: meta.crateVersion,
@@ -2744,6 +2748,9 @@
             var entry = layers.history[i];
             lines.push('- ' + entry.role + ': ' + entry.content);
           }
+        }
+        if (layers.combined_question) {
+          lines.push('\nUser Message:\n' + layers.combined_question);
         }
         if (layers.metadata) {
           lines.push('\nMetadata:\n' + JSON.stringify(layers.metadata, null, 2));
