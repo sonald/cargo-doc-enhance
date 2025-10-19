@@ -246,9 +246,45 @@ body.cdv-has-topbar { padding-top: 56px !important; }
   background: rgba(255,255,255,0.05);
   color: var(--cdv-fg);
   line-height: 1.5;
-  white-space: pre-wrap;
+  white-space: normal;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
 }
+.cdv-msg p { margin: 0 0 0.6em; }
+.cdv-msg p:last-child { margin-bottom: 0; }
+.cdv-msg ul,
+.cdv-msg ol { margin: 0 0 0.6em 1.25em; padding: 0; }
+.cdv-msg li { margin: 0.15em 0; }
+.cdv-msg code {
+  font-family: "Source Code Pro", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  background: rgba(255,255,255,0.08);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.cdv-msg pre {
+  background: rgba(10,12,20,0.8);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow: auto;
+  font-family: "Source Code Pro", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  margin: 0 0 0.8em;
+}
+.cdv-msg pre code {
+  background: transparent;
+  padding: 0;
+}
+.cdv-msg blockquote {
+  margin: 0 0 0.6em;
+  padding: 0.2em 0 0.2em 0.8em;
+  border-left: 3px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+}
+.cdv-msg a {
+  color: var(--cdv-accent);
+  text-decoration: none;
+}
+.cdv-msg a:hover { text-decoration: underline; }
 .cdv-msg.user {
   align-self: flex-end;
   background: rgba(106,166,255,0.16);

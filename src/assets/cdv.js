@@ -2524,20 +2524,20 @@
           }
           answer = sanitizeText(answer);
           placeholder.classList.remove('pending');
-          placeholder.textContent = answer;
+          setMessageContent(placeholder, answer);
           placeholder.classList.remove('error');
           pushHistory('assistant', answer);
         }).catch(function(err){
           if (err && err.name === 'AbortError') {
             placeholder.classList.remove('pending');
             placeholder.classList.add('error');
-            placeholder.textContent = 'Request cancelled.';
+            setMessageContent(placeholder, 'Request cancelled.');
             return;
           }
           placeholder.classList.remove('pending');
           placeholder.classList.add('error');
           var message = (err && err.message) ? err.message : String(err);
-          placeholder.textContent = 'Error: ' + message;
+          setMessageContent(placeholder, 'Error: ' + message);
           notifyContext('Request failed; copy context to try elsewhere.');
         }).finally(function(){
           setPending(false);
@@ -2975,10 +2975,209 @@
         var node = document.createElement('div');
         node.className = 'cdv-msg ' + role + (opts.pending ? ' pending' : '');
         node.setAttribute('data-role', role);
-        node.textContent = text;
+        setMessageContent(node, text);
         dom.messages.appendChild(node);
         dom.messages.scrollTop = dom.messages.scrollHeight;
         return node;
+      }
+
+      function setMessageContent(node, text) {
+        node.innerHTML = renderMarkdown(text || '');
+      }
+
+      function renderMarkdown(input) {
+        if (input === null || input === undefined) {
+          return '<p></p>';
+        }
+        var text = String(input).replace(/\r\n?/g, '\n');
+        var lines = text.split('\n');
+        var html = '';
+        var paragraph = [];
+        var inCode = false;
+        var codeLang = '';
+        var codeLines = [];
+        var listType = null;
+        var inBlockquote = false;
+
+        function flushParagraph() {
+          if (!paragraph.length) return;
+          var content = paragraph.map(function(line) {
+            return renderInline(line);
+          }).join('<br>');
+          html += '<p>' + content + '</p>';
+          paragraph = [];
+        }
+
+        function closeList() {
+          if (listType) {
+            html += '</' + listType + '>';
+            listType = null;
+          }
+        }
+
+        function closeBlockquote() {
+          if (inBlockquote) {
+            flushParagraph();
+            html += '</blockquote>';
+            inBlockquote = false;
+          }
+        }
+
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+          var trimmed = line.trim();
+
+          if (trimmed.indexOf('```') === 0) {
+            if (!inCode) {
+              flushParagraph();
+              closeList();
+              closeBlockquote();
+              inCode = true;
+              codeLang = trimmed.slice(3).trim();
+              codeLines = [];
+            } else {
+              html += '<pre><code' +
+                (codeLang ? ' class="language-' + escapeAttr(codeLang) + '"' : '') +
+                '>' + escapeHtml(codeLines.join('\n')) + '</code></pre>';
+              inCode = false;
+              codeLang = '';
+            }
+            continue;
+          }
+
+          if (inCode) {
+            codeLines.push(line);
+            continue;
+          }
+
+          var blockquoteMatch = line.match(/^\s*>\s?(.*)$/);
+          if (blockquoteMatch) {
+            if (!inBlockquote) {
+              flushParagraph();
+              closeList();
+              html += '<blockquote>';
+              inBlockquote = true;
+            }
+            paragraph.push(blockquoteMatch[1]);
+            continue;
+          } else if (inBlockquote) {
+            closeBlockquote();
+          }
+
+          var headingMatch = line.match(/^\s*(#{1,6})\s+(.*)$/);
+          if (headingMatch) {
+            flushParagraph();
+            closeList();
+            closeBlockquote();
+            var level = headingMatch[1].length;
+            html += '<h' + level + '>' + renderInline(headingMatch[2].trim()) + '</h' + level + '>';
+            continue;
+          }
+
+          if (/^\s*(?:---+|___+|\*\*\*+)\s*$/.test(trimmed)) {
+            flushParagraph();
+            closeList();
+            closeBlockquote();
+            html += '<hr>';
+            continue;
+          }
+
+          var olMatch = line.match(/^\s*\d+\.\s+(.*)$/);
+          if (olMatch) {
+            flushParagraph();
+            if (listType !== 'ol') {
+              closeList();
+              closeBlockquote();
+              html += '<ol>';
+              listType = 'ol';
+            }
+            html += '<li>' + renderInline(olMatch[1]) + '</li>';
+            continue;
+          }
+
+          var ulMatch = line.match(/^\s*[*+-]\s+(.*)$/);
+          if (ulMatch) {
+            flushParagraph();
+            if (listType !== 'ul') {
+              closeList();
+              closeBlockquote();
+              html += '<ul>';
+              listType = 'ul';
+            }
+            html += '<li>' + renderInline(ulMatch[1]) + '</li>';
+            continue;
+          }
+
+          if (!trimmed) {
+            flushParagraph();
+            closeList();
+            continue;
+          }
+
+          if (listType) {
+            closeList();
+          }
+
+          paragraph.push(line);
+        }
+
+        if (inCode) {
+          html += '<pre><code' +
+            (codeLang ? ' class="language-' + escapeAttr(codeLang) + '"' : '') +
+            '>' + escapeHtml(codeLines.join('\n')) + '</code></pre>';
+          inCode = false;
+        }
+
+        closeBlockquote();
+        flushParagraph();
+        closeList();
+
+        if (!html.trim()) {
+          return '<p>' + renderInline(text) + '</p>';
+        }
+        return html;
+      }
+
+      function renderInline(text) {
+        var escaped = escapeHtml(text);
+        var codeTokens = [];
+        escaped = escaped.replace(/`([^`]+)`/g, function(_, code) {
+          var idx = codeTokens.push('<code>' + code + '</code>') - 1;
+          return '§§CODE' + idx + '§§';
+        });
+        escaped = escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function(_, label, url) {
+          return '<a href="' + escapeAttr(url) + '" target="_blank" rel="noopener">' + label + '</a>';
+        });
+        escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        escaped = escaped.replace(/__(.+?)__/g, '<strong>$1</strong>');
+        escaped = escaped.replace(/(^|[\s>({\[])\*([^*\n]+?)\*(?=[\s<)\]}.,!?]|$)/g, function(_, prefix, content) {
+          return prefix + '<em>' + content + '</em>';
+        });
+        escaped = escaped.replace(/(^|[\s>({\[])_([^_\n]+?)_(?=[\s<)\]}.,!?]|$)/g, function(_, prefix, content) {
+          return prefix + '<em>' + content + '</em>';
+        });
+        escaped = escaped.replace(/~~([^~]+?)~~/g, '<del>$1</del>');
+        escaped = escaped.replace(/§§CODE(\d+)§§/g, function(_, idx) {
+          return codeTokens[Number(idx)] || '';
+        });
+        return escaped;
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, function(ch) {
+          switch (ch) {
+            case '&': return '&amp;';
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '"': return '&quot;';
+            case "'": return '&#39;';
+            default: return ch;
+          }
+        });
+      }
+
+      function escapeAttr(value) {
+        return escapeHtml(value);
       }
 
       function saveSystemPromptOverride(value) {
