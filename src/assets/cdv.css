@@ -209,16 +209,6 @@ body.cdv-has-topbar { padding-top: 56px !important; }
   resize: vertical;
 }
 #cdv-chat-system-input.readonly { opacity: 0.65; cursor: not-allowed; }
-.cdv-chat-selection-actions { display: flex; justify-content: flex-end; }
-.cdv-chat-selection-actions button {
-  height: 26px; padding: 0 10px; border-radius: 999px;
-  border: 1px solid var(--cdv-border); background: rgba(106,166,255,0.12);
-  color: #e6efff; cursor: pointer; font-size: 11px;
-}
-.cdv-chat-selection-actions button.active {
-  background: rgba(106,166,255,0.28);
-  border-color: rgba(106,166,255,0.55);
-}
 .cdv-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .cdv-field span { opacity: 0.7; }
 .cdv-field input {
@@ -240,12 +230,56 @@ body.cdv-has-topbar { padding-top: 56px !important; }
   flex: 1; overflow: auto; padding: 12px;
   display: flex; flex-direction: column; gap: 12px;
 }
+#cdv-chat-selection-chip {
+  display: none;
+  margin: 0 12px 8px;
+  border: 1px solid rgba(106,166,255,0.35);
+  background: rgba(106,166,255,0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #dfe9ff;
+  font-size: 12px;
+  line-height: 1.45;
+  position: relative;
+}
+#cdv-chat-selection-chip.visible { display: block; }
+.cdv-selection-chip-label {
+  font-weight: 600;
+  opacity: 0.8;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 11px;
+}
+.cdv-selection-chip-body {
+  max-height: 120px;
+  overflow: auto;
+  padding-right: 18px;
+}
+#cdv-chat-selection-chip button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.12);
+  color: #f4f7ff;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+#cdv-chat-selection-chip button:hover {
+  background: rgba(255,255,255,0.24);
+}
 .cdv-msg {
   border-radius: 10px;
   padding: 10px 12px;
   background: rgba(255,255,255,0.05);
   color: var(--cdv-fg);
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
   white-space: normal;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
 }

@@ -623,6 +623,7 @@
         '</div>' +
         '<div id="cdv-chat-context" class="collapsed"></div>' +
         '<div id="cdv-chat-messages" aria-live="polite"></div>' +
+        '<div id="cdv-chat-selection-chip" class="cdv-selection-chip"></div>' +
         '<div id="cdv-chat-input-row">' +
           '<textarea id="cdv-chat-input" rows="1" placeholder="Ask about this page…"></textarea>' +
           '<button id="cdv-chat-send">Send</button>' +
@@ -2156,6 +2157,7 @@
         cancelBtn: null,
         contextToggle: null,
         closeBtn: null,
+        selectionChip: null,
         envPreview: null,
         selectionPreview: null,
         selectionMeta: null,
@@ -2165,8 +2167,7 @@
         modelInput: null,
         apiKeyInput: null,
         copyContextBtn: null,
-        contextStatus: null,
-        pinSelectionBtn: null
+        contextStatus: null
       };
       var state = createInitialState();
       var scheduleSelectionUpdate = debounce(handleSelectionChange, Math.max(120, state.config.context.debounce_ms || DEFAULT_CONFIG.context.debounce_ms));
@@ -2227,9 +2228,7 @@
           pending: false,
           abort: null,
           history: [],
-          selection: null,
-          pinnedSelection: null,
-          selectionPinned: false,
+          selectionSnippet: null,
           summary: '',
           tokens: {
             total: 0,
@@ -2271,9 +2270,11 @@
         dom.cancelBtn = document.getElementById('cdv-chat-cancel');
         dom.contextToggle = document.getElementById('cdv-chat-context-toggle');
         dom.closeBtn = document.getElementById('cdv-chat-close');
+        dom.selectionChip = document.getElementById('cdv-chat-selection-chip');
         if (!dom.sendBtn || !dom.input || !dom.messages || !dom.panel) return;
 
         buildContextPanel();
+        updateSelectionDisplays();
         updateModelLabel();
         updateContextVisibility();
         attachEvents();
@@ -2306,11 +2307,9 @@
         document.addEventListener('selectionchange', scheduleSelectionUpdate);
         document.addEventListener('mouseup', function(){ setTimeout(scheduleSelectionUpdate, 0); });
         window.addEventListener('hashchange', function(){
-          state.selection = null;
-          state.selectionPinned = false;
-          state.pinnedSelection = null;
+          state.selectionSnippet = null;
           state.summary = '';
-          updateSelectionControls();
+          updateSelectionDisplays();
           scheduleSummaryUpdate();
         });
         installSummaryObserver();
@@ -2343,9 +2342,6 @@
           '<section class="cdv-context-section" data-section="selection">' +
             '<header><span>Selection</span><span id="cdv-chat-selection-meta"></span></header>' +
             '<pre id="cdv-chat-selection"></pre>' +
-            '<div class="cdv-chat-selection-actions">' +
-              '<button type="button" id="cdv-chat-pin-selection">Pin selection</button>' +
-            '</div>' +
           '</section>' +
           '<section class="cdv-context-section" data-section="budget">' +
             '<header>Token Budget</header>' +
@@ -2372,7 +2368,6 @@
         dom.apiKeyInput = document.getElementById('cdv-chat-api-key');
         dom.copyContextBtn = document.getElementById('cdv-chat-copy-context');
         dom.contextStatus = document.getElementById('cdv-chat-context-status');
-        dom.pinSelectionBtn = document.getElementById('cdv-chat-pin-selection');
 
         if (dom.systemInput) {
           dom.systemInput.value = state.systemPrompt;
@@ -2417,9 +2412,6 @@
         if (dom.copyContextBtn) {
           dom.copyContextBtn.addEventListener('click', copyContext);
         }
-        if (dom.pinSelectionBtn) {
-          dom.pinSelectionBtn.addEventListener('click', togglePinSelection);
-        }
       }
 
       function updateModelLabel() {
@@ -2444,41 +2436,45 @@
           ', user ' + t.user;
       }
 
-      function updateSelectionControls() {
-        if (dom.pinSelectionBtn) {
-          dom.pinSelectionBtn.classList.toggle('active', !!state.selectionPinned);
-          dom.pinSelectionBtn.textContent = state.selectionPinned ? 'Unpin selection' : 'Pin selection';
+      function updateSelectionDisplays() {
+        var snippet = state.selectionSnippet;
+        if (dom.selectionPreview) {
+          dom.selectionPreview.textContent = snippet && snippet.text ? snippet.text : '(none)';
         }
         if (dom.selectionMeta) {
-          var sel = state.selectionPinned ? state.pinnedSelection : state.selection;
-          if (sel && sel.text) {
-            dom.selectionMeta.textContent = (state.selectionPinned ? '[pinned] ' : '') + sel.text.length + ' chars';
-          } else if (state.selectionPinned) {
-            dom.selectionMeta.textContent = '[pinned] (empty)';
+          if (snippet && snippet.text) {
+            dom.selectionMeta.textContent = snippet.text.length + ' chars';
           } else {
             dom.selectionMeta.textContent = 'None';
           }
         }
+        if (dom.selectionChip) {
+          if (snippet && snippet.text) {
+            var bodyHtml = escapeHtml(snippet.text).replace(/\n/g, '<br>');
+            dom.selectionChip.innerHTML =
+              '<div class="cdv-selection-chip-label">Selection</div>' +
+              '<div class="cdv-selection-chip-body">' + bodyHtml + '</div>' +
+              '<button type="button" id="cdv-chat-clear-selection" title="清除已选内容">×</button>';
+            dom.selectionChip.classList.add('visible');
+            var clearBtn = dom.selectionChip.querySelector('#cdv-chat-clear-selection');
+            if (clearBtn) {
+              clearBtn.addEventListener('click', function(ev){
+                ev.preventDefault();
+                ev.stopPropagation();
+                clearSelectionSnippet();
+              }, { once: true });
+            }
+          } else {
+            dom.selectionChip.innerHTML = '';
+            dom.selectionChip.classList.remove('visible');
+          }
+        }
       }
 
-      function togglePinSelection() {
-        if (state.selectionPinned) {
-          state.selectionPinned = false;
-          state.pinnedSelection = null;
-          updateSelectionControls();
-          updateContextPreview();
-          notifyContext('Selection unpinned.');
-          return;
-        }
-        if (!state.selection || !state.selection.text) {
-          notifyContext('Select content on the page first.');
-          return;
-        }
-        state.selectionPinned = true;
-        state.pinnedSelection = state.selection;
-        updateSelectionControls();
+      function clearSelectionSnippet() {
+        state.selectionSnippet = null;
+        updateSelectionDisplays();
         updateContextPreview();
-        notifyContext('Selection pinned for upcoming requests.');
       }
 
       function send() {
@@ -2594,8 +2590,8 @@
         var environmentText = renderEnvironmentPrompt(state.envTemplate, meta, features);
         var summary = ensureSummary();
         var summarySanitized = limitTextByTokens(sanitizeText(summary), state.config.context.page_tokens_budget);
-        var selection = state.selectionPinned && state.pinnedSelection ? state.pinnedSelection : state.selection;
-        var selectionText = selection && selection.text ? limitTextByTokens(sanitizeText(selection.text), state.config.context.page_tokens_budget) : '';
+        var selection = state.selectionSnippet;
+        var selectionText = selection && selection.text ? limitTextByTokens(selection.text, state.config.context.page_tokens_budget) : '';
         var historyMessages = sliceHistory();
         var historyTokens = 0;
         for (var i = 0; i < historyMessages.length; i++) {
@@ -2653,13 +2649,10 @@
         if (dom.envPreview) {
           dom.envPreview.textContent = renderEnvironmentPreview(layers);
         }
-        if (dom.selectionPreview) {
-          dom.selectionPreview.textContent = layers.selection || '(none)';
-        }
         if (dom.budget) {
           dom.budget.innerHTML = renderBudgetHtml(layers.tokens);
         }
-        updateSelectionControls();
+        updateSelectionDisplays();
         updateTokenIndicator();
       }
 
@@ -2922,12 +2915,12 @@
       }
 
       function handleSelectionChange() {
-        if (state.selectionPinned && state.pinnedSelection) {
-          return;
+        var snippet = captureSelection();
+        if (snippet) {
+          state.selectionSnippet = snippet;
+          updateSelectionDisplays();
+          updateContextPreview();
         }
-        state.selection = captureSelection();
-        updateSelectionControls();
-        updateContextPreview();
       }
 
       function captureSelection() {
@@ -2939,12 +2932,24 @@
           var range = sel.getRangeAt(0);
           var container = range.commonAncestorContainer;
           var main = document.querySelector('main') || document.body;
+          if (dom.panel && container) {
+            var el = container.nodeType === 1 ? container : container.parentNode;
+            if (el && dom.panel.contains(el)) {
+              return null;
+            }
+          }
           if (main && container && !main.contains(container)) return null;
           if (text.length > 4000) {
             text = text.slice(0, 4000) + '…';
           }
+          var sanitized = sanitizeText(text);
+          if (!sanitized) {
+            sel.removeAllRanges();
+            return null;
+          }
+          sel.removeAllRanges();
           return {
-            text: text,
+            text: sanitized,
             start: describeNode(range.startContainer),
             end: describeNode(range.endContainer),
             timestamp: Date.now()
