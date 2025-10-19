@@ -58,13 +58,30 @@
       } catch(_) { return {noTop:false, noChat:false, noSymbols:false}; }
     })();
 
+    var CDV_BOOTSTRAP = (function(){
+      try {
+        var data = window.__CDV_BOOTSTRAP__ || {};
+        if (!data || typeof data !== 'object') data = {};
+        if (!data.config || typeof data.config !== 'object') data.config = {};
+        if (!('config_path' in data) && typeof data.configPath === 'string') {
+          data.config_path = data.configPath;
+        }
+        if (typeof data.version !== 'string') {
+          data.version = '0.0.0';
+        }
+        return data;
+      } catch (_) {
+        return {config:{}, version:'0.0.0', config_path:''};
+      }
+    })();
+
     (function registerServiceWorker(){
       try {
         if (!('serviceWorker' in navigator)) return;
         var proto = String(location.protocol || '');
         if (proto !== 'http:' && proto !== 'https:') return;
-        var swUrl = new URL('cdv-sw.js', location.href);
-        navigator.serviceWorker.register(swUrl.href, {scope: './'}).catch(function(err){
+        var swUrl = location.origin + '/cdv-sw.js';
+        navigator.serviceWorker.register(swUrl, {scope: location.origin + '/'}).catch(function(err){
           console.warn('[CDV] Failed to register service worker:', err);
         });
       } catch (err) {
@@ -591,12 +608,24 @@
     if (!CDV_FLAGS.noChat && !document.getElementById('cdv-chat-panel')) {
       var panel = document.createElement('div');
       panel.id = 'cdv-chat-panel';
-      panel.innerHTML = ''+
-        '<div id="cdv-chat-header">LLM Chat</div>'+
-        '<div id="cdv-chat-messages"></div>'+
-        '<div id="cdv-chat-input-row">'+
-          '<input id="cdv-chat-input" type="text" placeholder="Ask about this page…" />'+
-          '<button id="cdv-chat-send">Send</button>'+
+      panel.innerHTML = '' +
+        '<div id="cdv-chat-header">' +
+          '<div class="cdv-chat-title">' +
+            '<span class="cdv-chat-name">AI Chart</span>' +
+            '<span class="cdv-chat-model" id="cdv-chat-model-label"></span>' +
+          '</div>' +
+          '<div class="cdv-chat-actions">' +
+            '<span class="cdv-chat-tokens" id="cdv-chat-token-indicator"></span>' +
+            '<button id="cdv-chat-context-toggle" title="查看当前请求上下文">Context</button>' +
+            '<button id="cdv-chat-cancel" title="停止当前请求" disabled>Stop</button>' +
+            '<button id="cdv-chat-close" title="关闭面板">×</button>' +
+          '</div>' +
+        '</div>' +
+        '<div id="cdv-chat-context" class="collapsed"></div>' +
+        '<div id="cdv-chat-messages" aria-live="polite"></div>' +
+        '<div id="cdv-chat-input-row">' +
+          '<textarea id="cdv-chat-input" rows="1" placeholder="Ask about this page…"></textarea>' +
+          '<button id="cdv-chat-send">Send</button>' +
         '</div>';
       document.body.appendChild(panel);
     }
@@ -2082,52 +2111,1137 @@
     // Sidebar injection is disabled; function dropdown moved next to top search
     (function setupSidebarSymbols(){ return; })();
 
-    // Chat: simple retrieval over page content
-    (function setupChat(){
-      var sendBtn = document.getElementById('cdv-chat-send');
-      var input = document.getElementById('cdv-chat-input');
-      var messages = document.getElementById('cdv-chat-messages');
-      if (!sendBtn || !input || !messages) return;
+    // Chat: AI context assistant
+    var CDV_CHAT = (function(){
+      var STORAGE_KEYS = {
+        apiKey: 'cdv.ai.api_key',
+        model: 'cdv.ai.model',
+        systemPrompt: 'cdv.ai.system_prompt'
+      };
+      var TOTAL_TOKEN_BUDGET = 6000;
+      var DEFAULT_CONFIG = {
+        api: {
+          base_url: 'https://api.openai.com/v1',
+          model: 'gpt-4.1-mini',
+          timeout_ms: 15000,
+          headers: {}
+        },
+        prompts: {
+          system: 'You are Cargo Doc Viewer’s AI assistant. Provide clear, concise answers grounded in the supplied Rust documentation context. If the context is insufficient, ask for clarification instead of guessing.',
+          environment_template: 'Crate: {{crate.name}}\nModule: {{page.module_path}}\nRust Edition: {{environment.edition}}\nAvailable Features: {{environment.features}}\n',
+          fallback_language: 'auto'
+        },
+        context: {
+          history_window: 6,
+          page_tokens_budget: 1200,
+          debounce_ms: 300,
+          sanitize_patterns: [
+            { regex: '(?i)apikey=[A-Za-z0-9_-]+', replacement: '[redacted]' }
+          ]
+        },
+        ui: {
+          language: 'auto',
+          show_context_preview: true,
+          allow_prompt_edit: true
+        }
+      };
+      var dom = {
+        panel: null,
+        sendBtn: null,
+        input: null,
+        messages: null,
+        contextHost: null,
+        modelLabel: null,
+        tokenIndicator: null,
+        cancelBtn: null,
+        contextToggle: null,
+        closeBtn: null,
+        envPreview: null,
+        selectionPreview: null,
+        selectionMeta: null,
+        budget: null,
+        systemInput: null,
+        resetSystem: null,
+        modelInput: null,
+        apiKeyInput: null,
+        copyContextBtn: null,
+        contextStatus: null,
+        pinSelectionBtn: null
+      };
+      var state = createInitialState();
+      var scheduleSelectionUpdate = debounce(handleSelectionChange, Math.max(120, state.config.context.debounce_ms || DEFAULT_CONFIG.context.debounce_ms));
+      var scheduleSummaryUpdate = debounce(recomputeSummary, 700);
 
-      function addMsg(text, who) {
-        var div = document.createElement('div');
-        div.className = 'cdv-msg ' + (who || 'assistant');
-        div.textContent = text;
-        messages.appendChild(div);
-        messages.scrollTop = messages.scrollHeight;
+      function maskSecret(value) {
+        if (!value) return value;
+        var str = String(value);
+        if (str.length <= 8) return '***';
+        return str.slice(0, 4) + '…' + str.slice(-4);
       }
 
-      function answer(q) {
-        var main = document.querySelector('main') || document.body;
-        var textNodes = [];
-        var walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT, null);
-        var node;
-        while ((node = walker.nextNode())) {
-          var t = (node.nodeValue || '').trim();
-          if (t.length > 40) textNodes.push(t);
+      function debugLogRequest(url, headers) {
+        try {
+          var preview = {};
+          Object.keys(headers || {}).forEach(function(key){
+            var value = headers[key];
+            if (String(key).toLowerCase() === 'authorization') {
+              preview[key] = maskSecret(value);
+            } else {
+              preview[key] = value;
+            }
+          });
+          console.info('[CDV][request] POST', url, preview);
+        } catch (err) {
+          console.warn('[CDV] Failed to log request preview:', err);
         }
-        var terms = q.toLowerCase().split(/\s+/).filter(Boolean);
-        function score(s) { return terms.reduce((acc, t) => acc + (s.toLowerCase().includes(t) ? 1 : 0), 0); }
-        var best = textNodes.map(s => ({s, sc: score(s)})).filter(x => x.sc > 0).sort((a,b)=>b.sc-a.sc).slice(0,3);
-        if (best.length === 0) {
-          addMsg('I could not find relevant snippets. Try a different query.', 'assistant');
-        } else {
-          var reply = 'Based on this page, relevant snippets:\n\n' + best.map(x => '- ' + x.s.slice(0,240) + (x.s.length>240?'…':'')).join('\n');
-          addMsg(reply, 'assistant');
+      }
+
+      function debugLogConfig() {
+        try {
+          var headers = {};
+          var src = state.config.api.headers || {};
+          Object.keys(src).forEach(function(key){
+            headers[key] = (String(key).toLowerCase() === 'authorization') ? maskSecret(src[key]) : src[key];
+          });
+          var keyPreview = state.apiKey ? maskSecret(state.apiKey) : '(none)';
+          console.groupCollapsed('[CDV][config] AI chat configuration');
+          console.log('configPath:', state.configPath || '(default)');
+          console.log('resolved base_url:', state.config.api.base_url);
+          console.log('resolved model:', state.config.api.model);
+          console.log('configured headers:', headers);
+          console.log('localStorage apiKey override:', keyPreview);
+          console.groupEnd();
+        } catch (err) {
+          console.warn('[CDV] Failed to emit config debug info:', err);
         }
+      }
+
+      function createInitialState() {
+        var cfg = normalizeConfig(CDV_BOOTSTRAP.config || {});
+        var defaults = normalizeConfig(null);
+        var st = {
+          config: cfg,
+          defaults: defaults,
+          version: typeof CDV_BOOTSTRAP.version === 'string' ? CDV_BOOTSTRAP.version : '0.0.0',
+          configPath: typeof CDV_BOOTSTRAP.config_path === 'string' ? CDV_BOOTSTRAP.config_path : '',
+          pending: false,
+          abort: null,
+          history: [],
+          selection: null,
+          pinnedSelection: null,
+          selectionPinned: false,
+          summary: '',
+          tokens: {
+            total: 0,
+            system: 0,
+            environment: 0,
+            page: 0,
+            selection: 0,
+            history: 0,
+            user: 0,
+            budget: TOTAL_TOKEN_BUDGET,
+            pageBudget: cfg.context.page_tokens_budget || DEFAULT_CONFIG.context.page_tokens_budget
+          },
+          contextOpen: !!(cfg.ui && cfg.ui.show_context_preview),
+          sanitizers: compileSanitizers(cfg.context.sanitize_patterns || []),
+          systemPrompt: '',
+          envTemplate: cfg.prompts.environment_template || DEFAULT_CONFIG.prompts.environment_template,
+          modelOverride: '',
+          apiKey: '',
+          lastContextLayers: null
+        };
+        st.systemPrompt = loadSystemPromptOverride(cfg.prompts.system || DEFAULT_CONFIG.prompts.system);
+        st.apiKey = loadFromStorage(STORAGE_KEYS.apiKey) || '';
+        st.modelOverride = loadFromStorage(STORAGE_KEYS.model) || '';
+        if (st.modelOverride) {
+          st.config.api.model = st.modelOverride;
+        }
+        return st;
+      }
+
+      function init() {
+        if (CDV_FLAGS.noChat) return;
+        dom.panel = document.getElementById('cdv-chat-panel');
+        dom.sendBtn = document.getElementById('cdv-chat-send');
+        dom.input = document.getElementById('cdv-chat-input');
+        dom.messages = document.getElementById('cdv-chat-messages');
+        dom.contextHost = document.getElementById('cdv-chat-context');
+        dom.modelLabel = document.getElementById('cdv-chat-model-label');
+        dom.tokenIndicator = document.getElementById('cdv-chat-token-indicator');
+        dom.cancelBtn = document.getElementById('cdv-chat-cancel');
+        dom.contextToggle = document.getElementById('cdv-chat-context-toggle');
+        dom.closeBtn = document.getElementById('cdv-chat-close');
+        if (!dom.sendBtn || !dom.input || !dom.messages || !dom.panel) return;
+
+        buildContextPanel();
+        updateModelLabel();
+        updateContextVisibility();
+        attachEvents();
+        autoResizeTextarea(dom.input);
+        state.summary = buildSummaryText();
+        updateContextPreview();
+        debugLogConfig();
+      }
+
+      function attachEvents() {
+        if (dom.sendBtn) dom.sendBtn.addEventListener('click', send);
+        if (dom.input) {
+          dom.input.addEventListener('keydown', function(ev){
+            if (ev.key === 'Enter' && !ev.shiftKey && !ev.metaKey && !ev.ctrlKey) {
+              ev.preventDefault();
+              send();
+            }
+          });
+          dom.input.addEventListener('input', function(){ autoResizeTextarea(dom.input); });
+        }
+        if (dom.cancelBtn) dom.cancelBtn.addEventListener('click', cancelRequest);
+        if (dom.contextToggle) dom.contextToggle.addEventListener('click', function(){
+          state.contextOpen = !state.contextOpen;
+          updateContextVisibility();
+        });
+        if (dom.closeBtn) dom.closeBtn.addEventListener('click', function(){
+          dom.panel.classList.remove('open');
+          document.body.classList.remove('cdv-chat-open');
+        });
+        document.addEventListener('selectionchange', scheduleSelectionUpdate);
+        document.addEventListener('mouseup', function(){ setTimeout(scheduleSelectionUpdate, 0); });
+        window.addEventListener('hashchange', function(){
+          state.selection = null;
+          state.selectionPinned = false;
+          state.pinnedSelection = null;
+          state.summary = '';
+          updateSelectionControls();
+          scheduleSummaryUpdate();
+        });
+        installSummaryObserver();
+      }
+
+      function updateContextVisibility() {
+        if (!dom.contextHost) return;
+        dom.contextHost.classList.toggle('collapsed', !state.contextOpen);
+        dom.contextHost.classList.toggle('expanded', state.contextOpen);
+        if (dom.contextToggle) {
+          dom.contextToggle.classList.toggle('active', state.contextOpen);
+        }
+      }
+
+      function buildContextPanel() {
+        if (!dom.contextHost) return;
+        var allowEdit = !!(state.config.ui && state.config.ui.allow_prompt_edit);
+        var configSource = state.configPath ? ('Config: ' + state.configPath) : 'Config: embedded defaults';
+        dom.contextHost.innerHTML =
+          '<section class="cdv-context-section" data-section="system">' +
+            '<header><span>System Prompt</span>' +
+              (allowEdit ? '<button type="button" id="cdv-chat-reset-system">Reset</button>' : '') +
+            '</header>' +
+            '<textarea id="cdv-chat-system-input" ' + (allowEdit ? '' : 'readonly') + '></textarea>' +
+          '</section>' +
+          '<section class="cdv-context-section" data-section="environment">' +
+            '<header>Environment</header>' +
+            '<pre id="cdv-chat-env"></pre>' +
+          '</section>' +
+          '<section class="cdv-context-section" data-section="selection">' +
+            '<header><span>Selection</span><span id="cdv-chat-selection-meta"></span></header>' +
+            '<pre id="cdv-chat-selection"></pre>' +
+            '<div class="cdv-chat-selection-actions">' +
+              '<button type="button" id="cdv-chat-pin-selection">Pin selection</button>' +
+            '</div>' +
+          '</section>' +
+          '<section class="cdv-context-section" data-section="budget">' +
+            '<header>Token Budget</header>' +
+            '<div id="cdv-chat-budget"></div>' +
+          '</section>' +
+          '<section class="cdv-context-section" data-section="api">' +
+            '<header>API Settings</header>' +
+            '<label class="cdv-field"><span>Model</span><input id="cdv-chat-model-input" type="text" /></label>' +
+            '<label class="cdv-field"><span>API Key</span><input id="cdv-chat-api-key" type="password" autocomplete="off" /></label>' +
+            '<div class="cdv-chat-config-meta">' + configSource + '</div>' +
+            '<div class="cdv-chat-actions-row">' +
+              '<button type="button" id="cdv-chat-copy-context">Copy context</button>' +
+              '<span id="cdv-chat-context-status" class="cdv-chat-status"></span>' +
+            '</div>' +
+          '</section>';
+
+        dom.envPreview = document.getElementById('cdv-chat-env');
+        dom.selectionPreview = document.getElementById('cdv-chat-selection');
+        dom.selectionMeta = document.getElementById('cdv-chat-selection-meta');
+        dom.budget = document.getElementById('cdv-chat-budget');
+        dom.systemInput = document.getElementById('cdv-chat-system-input');
+        dom.resetSystem = document.getElementById('cdv-chat-reset-system');
+        dom.modelInput = document.getElementById('cdv-chat-model-input');
+        dom.apiKeyInput = document.getElementById('cdv-chat-api-key');
+        dom.copyContextBtn = document.getElementById('cdv-chat-copy-context');
+        dom.contextStatus = document.getElementById('cdv-chat-context-status');
+        dom.pinSelectionBtn = document.getElementById('cdv-chat-pin-selection');
+
+        if (dom.systemInput) {
+          dom.systemInput.value = state.systemPrompt;
+          if (!allowEdit) {
+            dom.systemInput.setAttribute('readonly', 'readonly');
+            dom.systemInput.classList.add('readonly');
+          } else {
+            dom.systemInput.addEventListener('input', function(){
+              state.systemPrompt = dom.systemInput.value;
+              updateContextPreview();
+            });
+            dom.systemInput.addEventListener('blur', function(){
+              saveSystemPromptOverride(dom.systemInput.value);
+            });
+          }
+        }
+        if (dom.resetSystem) {
+          dom.resetSystem.addEventListener('click', function(){
+            saveSystemPromptOverride('');
+            notifyContext('System prompt reset.');
+          });
+        }
+        if (dom.modelInput) {
+          dom.modelInput.value = state.config.api.model || DEFAULT_CONFIG.api.model;
+          dom.modelInput.addEventListener('change', function(){
+            var next = dom.modelInput.value.trim();
+            state.config.api.model = next || DEFAULT_CONFIG.api.model;
+            saveToStorage(STORAGE_KEYS.model, next);
+            updateModelLabel();
+            updateContextPreview();
+            notifyContext('Model updated.');
+          });
+        }
+        if (dom.apiKeyInput) {
+          dom.apiKeyInput.value = state.apiKey;
+          dom.apiKeyInput.addEventListener('change', function(){
+            state.apiKey = dom.apiKeyInput.value.trim();
+            saveToStorage(STORAGE_KEYS.apiKey, state.apiKey);
+            notifyContext(state.apiKey ? 'API key saved locally.' : 'API key cleared.');
+          });
+        }
+        if (dom.copyContextBtn) {
+          dom.copyContextBtn.addEventListener('click', copyContext);
+        }
+        if (dom.pinSelectionBtn) {
+          dom.pinSelectionBtn.addEventListener('click', togglePinSelection);
+        }
+      }
+
+      function updateModelLabel() {
+        if (!dom.modelLabel) return;
+        dom.modelLabel.textContent = state.config.api.model ? ('Model: ' + state.config.api.model) : '';
+      }
+
+      function updateTokenIndicator() {
+        if (!dom.tokenIndicator) return;
+        var t = state.tokens || {};
+        if (!t.total) {
+          dom.tokenIndicator.textContent = '';
+          dom.tokenIndicator.removeAttribute('title');
+          return;
+        }
+        dom.tokenIndicator.textContent = '≈ ' + t.total + ' tok';
+        dom.tokenIndicator.title = 'system ' + t.system +
+          ', env ' + t.environment +
+          ', page ' + t.page +
+          ', selection ' + t.selection +
+          ', history ' + t.history +
+          ', user ' + t.user;
+      }
+
+      function updateSelectionControls() {
+        if (dom.pinSelectionBtn) {
+          dom.pinSelectionBtn.classList.toggle('active', !!state.selectionPinned);
+          dom.pinSelectionBtn.textContent = state.selectionPinned ? 'Unpin selection' : 'Pin selection';
+        }
+        if (dom.selectionMeta) {
+          var sel = state.selectionPinned ? state.pinnedSelection : state.selection;
+          if (sel && sel.text) {
+            dom.selectionMeta.textContent = (state.selectionPinned ? '[pinned] ' : '') + sel.text.length + ' chars';
+          } else if (state.selectionPinned) {
+            dom.selectionMeta.textContent = '[pinned] (empty)';
+          } else {
+            dom.selectionMeta.textContent = 'None';
+          }
+        }
+      }
+
+      function togglePinSelection() {
+        if (state.selectionPinned) {
+          state.selectionPinned = false;
+          state.pinnedSelection = null;
+          updateSelectionControls();
+          updateContextPreview();
+          notifyContext('Selection unpinned.');
+          return;
+        }
+        if (!state.selection || !state.selection.text) {
+          notifyContext('Select content on the page first.');
+          return;
+        }
+        state.selectionPinned = true;
+        state.pinnedSelection = state.selection;
+        updateSelectionControls();
+        updateContextPreview();
+        notifyContext('Selection pinned for upcoming requests.');
       }
 
       function send() {
-        var q = input.value.trim();
-        if (!q) return;
-        addMsg(q, 'user');
-        input.value = '';
-        setTimeout(function(){ answer(q); }, 50);
+        if (state.pending) return;
+        if (!dom.input) return;
+        var raw = dom.input.value || '';
+        var trimmed = raw.trim();
+        if (!trimmed) return;
+        var sanitizedQuestion = sanitizeText(trimmed);
+        dom.input.value = '';
+        autoResizeTextarea(dom.input);
+        appendMessage('user', sanitizedQuestion);
+        pushHistory('user', sanitizedQuestion);
+        var request = buildRequestPayload(sanitizedQuestion);
+        state.lastContextLayers = request.layers;
+        updateTokenIndicator();
+        var placeholder = appendMessage('assistant', 'Thinking…', { pending: true });
+        setPending(true);
+        var controller = new AbortController();
+        state.abort = controller;
+        var url = buildEndpoint(state.config.api.base_url);
+        var headers = buildHeaders();
+        if (!hasHeader(headers, 'content-type')) {
+          headers['Content-Type'] = 'application/json';
+        }
+        debugLogRequest(url, headers);
+        fetch(url, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(request.payload),
+          signal: controller.signal
+        }).then(function(resp){
+          if (!resp.ok) {
+            return resp.text().then(function(text){
+              throw buildHttpError(resp.status, text);
+            });
+          }
+          return resp.json();
+        }).then(function(data){
+          var answer = extractAssistantContent(data);
+          if (!answer) {
+            answer = 'No response received.';
+          }
+          answer = sanitizeText(answer);
+          placeholder.classList.remove('pending');
+          placeholder.textContent = answer;
+          placeholder.classList.remove('error');
+          pushHistory('assistant', answer);
+        }).catch(function(err){
+          if (err && err.name === 'AbortError') {
+            placeholder.classList.remove('pending');
+            placeholder.classList.add('error');
+            placeholder.textContent = 'Request cancelled.';
+            return;
+          }
+          placeholder.classList.remove('pending');
+          placeholder.classList.add('error');
+          var message = (err && err.message) ? err.message : String(err);
+          placeholder.textContent = 'Error: ' + message;
+          notifyContext('Request failed; copy context to try elsewhere.');
+        }).finally(function(){
+          setPending(false);
+          state.abort = null;
+          updateContextPreview();
+        });
       }
 
-      sendBtn.addEventListener('click', send);
-      input.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') send(); });
+      function cancelRequest() {
+        if (state.abort) {
+          state.abort.abort();
+          state.abort = null;
+        }
+      }
+
+      function setPending(pending) {
+        state.pending = pending;
+        if (dom.sendBtn) dom.sendBtn.disabled = pending;
+        if (dom.input) dom.input.disabled = pending;
+        if (dom.cancelBtn) dom.cancelBtn.disabled = !pending;
+        if (dom.panel) dom.panel.classList.toggle('pending', pending);
+      }
+
+      function buildRequestPayload(question) {
+        var layers = computeContextLayers(question);
+        state.tokens = layers.tokens;
+        var messages = [];
+        if (layers.system) messages.push({ role: 'system', content: layers.system });
+        if (layers.environment) messages.push({ role: 'system', content: 'Environment context:\n' + layers.environment });
+        if (layers.summary) messages.push({ role: 'system', content: 'Page summary:\n' + layers.summary });
+        if (layers.selection) messages.push({ role: 'system', content: 'User selection:\n' + layers.selection });
+        if (layers.history && layers.history.length) {
+          layers.history.forEach(function(entry){
+            messages.push({ role: entry.role, content: entry.content });
+          });
+        }
+        messages.push({ role: 'user', content: layers.question || question });
+        var payload = {
+          model: state.config.api.model || DEFAULT_CONFIG.api.model,
+          messages: messages,
+          metadata: {
+            cdv_version: state.version,
+            doc_path: layers.metadata && layers.metadata.location || '',
+            crate: layers.metadata && layers.metadata.crate || '',
+            module: layers.metadata && layers.metadata.module_path || ''
+          }
+        };
+        return { payload: payload, layers: layers };
+      }
+
+      function computeContextLayers(question) {
+        var sanitizedQuestion = sanitizeText(question || '');
+        var meta = gatherMetadata();
+        var features = collectEnabledFeatures();
+        var environmentText = renderEnvironmentPrompt(state.envTemplate, meta, features);
+        var summary = ensureSummary();
+        var summarySanitized = limitTextByTokens(sanitizeText(summary), state.config.context.page_tokens_budget);
+        var selection = state.selectionPinned && state.pinnedSelection ? state.pinnedSelection : state.selection;
+        var selectionText = selection && selection.text ? limitTextByTokens(sanitizeText(selection.text), state.config.context.page_tokens_budget) : '';
+        var historyMessages = sliceHistory();
+        var historyTokens = 0;
+        for (var i = 0; i < historyMessages.length; i++) {
+          historyTokens += estimateTokens(historyMessages[i].content);
+        }
+        var fallback = state.config.prompts && state.config.prompts.fallback_language;
+        var systemPrompt = (state.systemPrompt || DEFAULT_CONFIG.prompts.system).trim();
+        if (fallback && fallback !== 'auto') {
+          systemPrompt = systemPrompt + '\nRespond in ' + fallback + '.';
+        }
+        systemPrompt = systemPrompt.trim();
+        var tokens = {
+          system: systemPrompt ? estimateTokens(systemPrompt) : 0,
+          environment: environmentText ? estimateTokens(environmentText) : 0,
+          page: summarySanitized ? estimateTokens(summarySanitized) : 0,
+          selection: selectionText ? estimateTokens(selectionText) : 0,
+          history: historyTokens,
+          user: sanitizedQuestion ? estimateTokens(sanitizedQuestion) : 0,
+          budget: TOTAL_TOKEN_BUDGET,
+          pageBudget: state.config.context.page_tokens_budget || DEFAULT_CONFIG.context.page_tokens_budget
+        };
+        tokens.total = tokens.system + tokens.environment + tokens.page + tokens.selection + tokens.history + tokens.user;
+        return {
+          system: systemPrompt,
+          environment: environmentText,
+          summary: summarySanitized,
+          selection: selectionText,
+          selectionMeta: selection,
+          history: historyMessages,
+          question: sanitizedQuestion,
+          metadata: {
+            crate: meta.crate,
+            crate_version: meta.crateVersion,
+            module_path: meta.modulePath,
+            edition: meta.edition,
+            features: features,
+            location: meta.location,
+            language: meta.language,
+            title: meta.title
+          },
+          tokens: tokens
+        };
+      }
+
+      function updateContextPreview() {
+        if (!dom.contextHost) return;
+        var layers = computeContextLayers('');
+        state.tokens = layers.tokens;
+        state.lastContextLayers = layers;
+        if (dom.envPreview) {
+          dom.envPreview.textContent = renderEnvironmentPreview(layers);
+        }
+        if (dom.selectionPreview) {
+          dom.selectionPreview.textContent = layers.selection || '(none)';
+        }
+        if (dom.budget) {
+          dom.budget.innerHTML = renderBudgetHtml(layers.tokens);
+        }
+        updateSelectionControls();
+        updateTokenIndicator();
+      }
+
+      function renderBudgetHtml(tokens) {
+        if (!tokens) return '';
+        var rows = [
+          '<div class="cdv-budget-total">≈ ' + tokens.total + ' / ' + tokens.budget + ' tokens</div>',
+          '<div class="cdv-budget-item">System: ' + tokens.system + '</div>',
+          '<div class="cdv-budget-item">Environment: ' + tokens.environment + '</div>',
+          '<div class="cdv-budget-item">Page summary: ' + tokens.page + ' / ' + tokens.pageBudget + '</div>',
+          '<div class="cdv-budget-item">Selection: ' + tokens.selection + '</div>',
+          '<div class="cdv-budget-item">History: ' + tokens.history + '</div>',
+          '<div class="cdv-budget-item">User: ' + tokens.user + '</div>'
+        ];
+        return rows.join('');
+      }
+
+      function renderEnvironmentPreview(layers) {
+        var meta = layers.metadata || {};
+        var lines = [];
+        if (meta.crate) {
+          var line = 'Crate: ' + meta.crate;
+          if (meta.crate_version) line += ' v' + meta.crate_version;
+          lines.push(line);
+        }
+        if (meta.module_path) lines.push('Module: ' + meta.module_path);
+        if (meta.title) lines.push('Title: ' + meta.title);
+        if (meta.location) lines.push('Path: ' + meta.location);
+        if (meta.edition) lines.push('Edition: ' + meta.edition);
+        if (meta.features && meta.features.length) lines.push('Features: ' + meta.features.join(', '));
+        lines.push('Language: ' + (meta.language || 'en'));
+        if (layers.environment) {
+          lines.push('');
+          lines.push('Template output:');
+          lines.push(layers.environment);
+        }
+        return lines.join('\n');
+      }
+
+      function copyContext() {
+        var layers = state.lastContextLayers || computeContextLayers('');
+        var text = formatContextForCopy(layers);
+        if (!text) {
+          notifyContext('No context to copy.');
+          return;
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function(){
+            notifyContext('Context copied to clipboard.');
+          }).catch(function(err){
+            console.warn('[CDV] Clipboard write failed:', err);
+            fallbackCopy(text);
+          });
+        } else {
+          fallbackCopy(text);
+        }
+      }
+
+      function fallbackCopy(text) {
+        try {
+          var temp = document.createElement('textarea');
+          temp.value = text;
+          temp.setAttribute('readonly', '');
+          temp.style.position = 'fixed';
+          temp.style.top = '-9999px';
+          document.body.appendChild(temp);
+          temp.select();
+          document.execCommand('copy');
+          document.body.removeChild(temp);
+          notifyContext('Context copied to clipboard.');
+        } catch (err) {
+          notifyContext('Copy failed: ' + err.message);
+        }
+      }
+
+      function formatContextForCopy(layers) {
+        if (!layers) return '';
+        var lines = [];
+        lines.push('System Prompt:\n' + (layers.system || '(none)'));
+        lines.push('\nEnvironment:\n' + (layers.environment || '(none)'));
+        lines.push('\nPage Summary:\n' + (layers.summary || '(none)'));
+        lines.push('\nSelection:\n' + (layers.selection || '(none)'));
+        if (layers.history && layers.history.length) {
+          lines.push('\nHistory:');
+          for (var i = 0; i < layers.history.length; i++) {
+            var entry = layers.history[i];
+            lines.push('- ' + entry.role + ': ' + entry.content);
+          }
+        }
+        if (layers.metadata) {
+          lines.push('\nMetadata:\n' + JSON.stringify(layers.metadata, null, 2));
+        }
+        return lines.join('\n');
+      }
+
+      function notifyContext(message) {
+        if (!dom.contextStatus) return;
+        dom.contextStatus.textContent = message || '';
+        if (message) {
+          dom.contextStatus.classList.add('show');
+          setTimeout(function(){
+            if (dom.contextStatus.textContent === message) {
+              dom.contextStatus.textContent = '';
+              dom.contextStatus.classList.remove('show');
+            }
+          }, 3000);
+        }
+      }
+
+      function gatherMetadata() {
+        var metaTag = document.querySelector('meta[name="rustdoc-vars"]');
+        var ds = metaTag && metaTag.dataset ? metaTag.dataset : {};
+        var language = (document.documentElement && document.documentElement.getAttribute('lang')) || '';
+        if (!language && state.config.ui && state.config.ui.language && state.config.ui.language !== 'auto') {
+          language = state.config.ui.language;
+        }
+        return {
+          crate: ds.currentCrate || ds.crate || ds.rootCrate || '',
+          crateVersion: ds.currentVersion || ds.crateVersion || '',
+          modulePath: ds.currentModule || ds.modulePath || '',
+          edition: ds.edition || '',
+          language: language || 'en',
+          location: (location.pathname || '') + (location.search || '') + (location.hash || ''),
+          title: document.title || ''
+        };
+      }
+
+      function collectEnabledFeatures() {
+        var features = [];
+        try {
+          var meta = document.querySelector('meta[name="cdv-crate-features"]');
+          if (meta && meta.content) {
+            features = meta.content.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+          }
+        } catch (_) {}
+        if (!features.length && document.body) {
+          var attr = document.body.getAttribute('data-enabled-features') || document.body.getAttribute('data-features');
+          if (attr) {
+            features = attr.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+          }
+        }
+        return features;
+      }
+
+      function renderEnvironmentPrompt(template, meta, features) {
+        var ctx = {
+          crate: {
+            name: meta.crate || '(unknown crate)',
+            version: meta.crateVersion || ''
+          },
+          page: {
+            module_path: meta.modulePath || '',
+            title: meta.title || '',
+            location: meta.location || ''
+          },
+          environment: {
+            edition: meta.edition || '',
+            features: features && features.length ? features.join(', ') : 'none',
+            language: meta.language || 'en'
+          }
+        };
+        return renderTemplate(template || DEFAULT_CONFIG.prompts.environment_template, ctx).trim();
+      }
+
+      function renderTemplate(template, context) {
+        if (!template) return '';
+        return template.replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, function(_, path){
+          var parts = path.split('.');
+          var value = context;
+          for (var i = 0; i < parts.length; i++) {
+            if (!value || typeof value !== 'object') {
+              value = '';
+              break;
+            }
+            value = value[parts[i]];
+          }
+          if (value === undefined || value === null) return '';
+          if (Array.isArray(value)) return value.join(', ');
+          return String(value);
+        });
+      }
+
+      function installSummaryObserver() {
+        try {
+          var main = document.querySelector('main');
+          if (!main) return;
+          var observer = new MutationObserver(function(mutations){
+            for (var i = 0; i < mutations.length; i++) {
+              var m = mutations[i];
+              if (m.type === 'childList' || m.type === 'characterData') {
+                state.summary = '';
+                scheduleSummaryUpdate();
+                break;
+              }
+            }
+          });
+          observer.observe(main, { subtree: true, childList: true, characterData: true });
+        } catch (_) {}
+      }
+
+      function recomputeSummary() {
+        state.summary = buildSummaryText();
+        updateContextPreview();
+      }
+
+      function ensureSummary() {
+        if (!state.summary) {
+          state.summary = buildSummaryText();
+        }
+        return state.summary || '';
+      }
+
+      function buildSummaryText() {
+        var main = document.querySelector('main') || document.body;
+        if (!main) return '';
+        var parts = [];
+        var titleEl = document.querySelector('.main-heading h1');
+        if (titleEl) {
+          var title = (titleEl.textContent || '').replace(/\s+/g, ' ').trim();
+          if (title) parts.push('Title: ' + title);
+        }
+        var paragraphs = main.querySelectorAll('p');
+        for (var i = 0; i < paragraphs.length; i++) {
+          var text = (paragraphs[i].textContent || '').replace(/\s+/g, ' ').trim();
+          if (text.length < 60) continue;
+          parts.push(text);
+          if (estimateTokens(parts.join('\n\n')) >= (state.config.context.page_tokens_budget || DEFAULT_CONFIG.context.page_tokens_budget) * 2) {
+            break;
+          }
+        }
+        if (!parts.length) {
+          var fallback = (main.textContent || '').replace(/\s+/g, ' ').trim();
+          if (fallback.length > 0) {
+            parts.push(fallback.slice(0, 600));
+          }
+        }
+        return parts.join('\n\n');
+      }
+
+      function sliceHistory() {
+        var maxPairs = state.config.context.history_window || DEFAULT_CONFIG.context.history_window;
+        var limit = Math.max(0, maxPairs) * 2;
+        if (!limit) return [];
+        var slice = state.history.slice(-limit);
+        return slice.map(function(entry){
+          return { role: entry.role, content: entry.content };
+        });
+      }
+
+      function pushHistory(role, content) {
+        state.history.push({ role: role, content: content });
+        var maxPairs = state.config.context.history_window || DEFAULT_CONFIG.context.history_window;
+        var limit = Math.max(0, maxPairs) * 2;
+        if (limit > 0 && state.history.length > limit) {
+          state.history = state.history.slice(-limit);
+        }
+      }
+
+      function handleSelectionChange() {
+        if (state.selectionPinned && state.pinnedSelection) {
+          return;
+        }
+        state.selection = captureSelection();
+        updateSelectionControls();
+        updateContextPreview();
+      }
+
+      function captureSelection() {
+        try {
+          var sel = window.getSelection();
+          if (!sel || sel.isCollapsed) return null;
+          var text = String(sel.toString() || '').trim();
+          if (!text) return null;
+          var range = sel.getRangeAt(0);
+          var container = range.commonAncestorContainer;
+          var main = document.querySelector('main') || document.body;
+          if (main && container && !main.contains(container)) return null;
+          if (text.length > 4000) {
+            text = text.slice(0, 4000) + '…';
+          }
+          return {
+            text: text,
+            start: describeNode(range.startContainer),
+            end: describeNode(range.endContainer),
+            timestamp: Date.now()
+          };
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function describeNode(node) {
+        if (!node) return '';
+        var path = [];
+        var current = node.nodeType === 1 ? node : node.parentNode;
+        var depth = 0;
+        while (current && current !== document.body && depth < 40) {
+          var parent = current.parentNode;
+          if (!parent) break;
+          var index = Array.prototype.indexOf.call(parent.childNodes, current);
+          path.push(index);
+          current = parent;
+          depth++;
+        }
+        return path.reverse().join('.');
+      }
+
+      function appendMessage(role, text, opts) {
+        opts = opts || {};
+        var node = document.createElement('div');
+        node.className = 'cdv-msg ' + role + (opts.pending ? ' pending' : '');
+        node.setAttribute('data-role', role);
+        node.textContent = text;
+        dom.messages.appendChild(node);
+        dom.messages.scrollTop = dom.messages.scrollHeight;
+        return node;
+      }
+
+      function saveSystemPromptOverride(value) {
+        var defaultPrompt = state.config.prompts.system || DEFAULT_CONFIG.prompts.system;
+        var trimmed = (value || '').trim();
+        if (!trimmed) {
+          try { localStorage.removeItem(STORAGE_KEYS.systemPrompt); } catch (_) {}
+          state.systemPrompt = defaultPrompt;
+        } else {
+          state.systemPrompt = trimmed;
+          if (trimmed === defaultPrompt) {
+            try { localStorage.removeItem(STORAGE_KEYS.systemPrompt); } catch (_) {}
+          } else {
+            saveToStorage(STORAGE_KEYS.systemPrompt, trimmed);
+          }
+        }
+        if (dom.systemInput && dom.systemInput.value !== state.systemPrompt) {
+          dom.systemInput.value = state.systemPrompt;
+        }
+        updateContextPreview();
+      }
+
+      function loadSystemPromptOverride(defaultPrompt) {
+        var stored = loadFromStorage(STORAGE_KEYS.systemPrompt);
+        if (stored && stored.trim()) return stored;
+        return defaultPrompt || DEFAULT_CONFIG.prompts.system;
+      }
+
+      function normalizeConfig(raw) {
+        if (!raw || typeof raw !== 'object') raw = {};
+        var cfg = mergeObjects(DEFAULT_CONFIG, raw);
+        if (!cfg.context || typeof cfg.context !== 'object') {
+          cfg.context = mergeObjects(DEFAULT_CONFIG.context, null);
+        }
+        if (!Array.isArray(cfg.context.sanitize_patterns) || !cfg.context.sanitize_patterns.length) {
+          cfg.context.sanitize_patterns = DEFAULT_CONFIG.context.sanitize_patterns.slice();
+        } else {
+          cfg.context.sanitize_patterns = cfg.context.sanitize_patterns.map(function(item){
+            if (!item || typeof item !== 'object') {
+              return { regex: DEFAULT_CONFIG.context.sanitize_patterns[0].regex, replacement: DEFAULT_CONFIG.context.sanitize_patterns[0].replacement };
+            }
+            return {
+              regex: String(item.regex != null ? item.regex : DEFAULT_CONFIG.context.sanitize_patterns[0].regex),
+              replacement: String(item.replacement != null ? item.replacement : DEFAULT_CONFIG.context.sanitize_patterns[0].replacement)
+            };
+          });
+        }
+        if (!cfg.api || typeof cfg.api !== 'object') {
+          cfg.api = mergeObjects(DEFAULT_CONFIG.api, null);
+        }
+        if (!cfg.api.headers || typeof cfg.api.headers !== 'object') {
+          cfg.api.headers = {};
+        }
+        if (!cfg.prompts || typeof cfg.prompts !== 'object') {
+          cfg.prompts = mergeObjects(DEFAULT_CONFIG.prompts, null);
+        }
+        if (!cfg.ui || typeof cfg.ui !== 'object') {
+          cfg.ui = mergeObjects(DEFAULT_CONFIG.ui, null);
+        }
+        return cfg;
+      }
+
+      function mergeObjects(base, extra) {
+        var out = {};
+        if (base && typeof base === 'object') {
+          Object.keys(base).forEach(function(key){
+            var value = base[key];
+            if (Array.isArray(value)) {
+              out[key] = value.slice();
+            } else if (value && typeof value === 'object') {
+              out[key] = mergeObjects(value, null);
+            } else {
+              out[key] = value;
+            }
+          });
+        }
+        if (extra && typeof extra === 'object') {
+          Object.keys(extra).forEach(function(key){
+            var value = extra[key];
+            if (value === undefined || value === null) return;
+            if (Array.isArray(value)) {
+              out[key] = value.slice();
+            } else if (value && typeof value === 'object') {
+              var baseValue = out[key] && typeof out[key] === 'object' && !Array.isArray(out[key]) ? out[key] : {};
+              out[key] = mergeObjects(baseValue, value);
+            } else {
+              out[key] = value;
+            }
+          });
+        }
+        return out;
+      }
+
+      function compileSanitizers(patterns) {
+        var compiled = [];
+        for (var i = 0; i < patterns.length; i++) {
+          var pattern = patterns[i];
+          if (!pattern || typeof pattern.regex !== 'string') continue;
+          var src = pattern.regex;
+          var flags = 'g';
+          var inline = src.match(/^\(\?([a-z]+)\)/i);
+          if (inline) {
+            src = src.slice(inline[0].length);
+            var set = inline[1].toLowerCase();
+            if (set.indexOf('i') >= 0 && flags.indexOf('i') === -1) flags += 'i';
+            if (set.indexOf('m') >= 0 && flags.indexOf('m') === -1) flags += 'm';
+          }
+          try {
+            var re = new RegExp(src, flags);
+            compiled.push({ regex: re, replacement: String(pattern.replacement != null ? pattern.replacement : '') });
+          } catch (err) {
+            console.warn('[CDV] Failed to compile sanitize regex:', pattern.regex, err);
+          }
+        }
+        return compiled;
+      }
+
+      function sanitizeText(text) {
+        if (!text) return '';
+        var value = String(text);
+        for (var i = 0; i < state.sanitizers.length; i++) {
+          try {
+            value = value.replace(state.sanitizers[i].regex, state.sanitizers[i].replacement);
+          } catch (_) {}
+        }
+        return value;
+      }
+
+      function limitTextByTokens(text, maxTokens) {
+        if (!text) return '';
+        if (!maxTokens || maxTokens <= 0) return text;
+        var tokens = estimateTokens(text);
+        if (tokens <= maxTokens) return text;
+        var ratio = maxTokens / tokens;
+        var targetChars = Math.max(120, Math.floor(text.length * ratio));
+        return text.slice(0, targetChars) + '…';
+      }
+
+      function estimateTokens(text) {
+        if (!text) return 0;
+        var clean = String(text);
+        return Math.max(1, Math.ceil(clean.length / 4));
+      }
+
+      function buildEndpoint(base) {
+        var url = base || DEFAULT_CONFIG.api.base_url;
+        if (!url) return '/chat/completions';
+        var trimmed = String(url).trim().replace(/\/+$/, '');
+        if (!trimmed) trimmed = DEFAULT_CONFIG.api.base_url;
+        if (/\/chat\/completions$/i.test(trimmed)) return trimmed;
+        return trimmed + '/chat/completions';
+      }
+
+      function buildHeaders() {
+        var headers = {};
+        var src = state.config.api.headers || {};
+        Object.keys(src).forEach(function(key){
+          headers[key] = maybeNormalizeAuthHeader(key, src[key]);
+        });
+        if (!hasHeader(headers, 'authorization') && state.apiKey) {
+          headers['Authorization'] = normalizeBearer(state.apiKey);
+        }
+        return headers;
+      }
+
+      function hasHeader(map, name) {
+        var lower = name.toLowerCase();
+        for (var key in map) {
+          if (Object.prototype.hasOwnProperty.call(map, key)) {
+            if (String(key).toLowerCase() === lower) return true;
+          }
+        }
+        return false;
+      }
+
+      function maybeNormalizeAuthHeader(name, value) {
+        if (!value) return value;
+        if (String(name).toLowerCase() !== 'authorization') return value;
+        return normalizeBearer(value);
+      }
+
+      function normalizeBearer(value) {
+        if (!value) return value;
+        var trimmed = String(value).trim();
+        if (!trimmed) return trimmed;
+        if (/^bearer\s+/i.test(trimmed)) {
+          return trimmed;
+        }
+        // Some OpenRouter keys start with sk-; attach prefix automatically.
+        return 'Bearer ' + trimmed;
+      }
+
+      function buildHttpError(status, body) {
+        var message = 'HTTP ' + status;
+        if (body) {
+          var trimmed = body.trim();
+          if (trimmed) {
+            try {
+              var parsed = JSON.parse(trimmed);
+              if (parsed && parsed.error && parsed.error.message) {
+                message += ' - ' + parsed.error.message;
+              } else {
+                message += ' - ' + trimmed.slice(0, 240);
+              }
+            } catch (_) {
+              message += ' - ' + trimmed.slice(0, 240);
+            }
+          }
+        }
+        var err = new Error(message);
+        err.status = status;
+        return err;
+      }
+
+      function extractAssistantContent(data) {
+        if (!data) return '';
+        if (data.error && data.error.message) {
+          throw new Error(data.error.message);
+        }
+        if (Array.isArray(data.choices) && data.choices.length > 0) {
+          var choice = data.choices[0];
+          if (choice.message && typeof choice.message.content === 'string') {
+            return choice.message.content.trim();
+          }
+          if (typeof choice.text === 'string') {
+            return choice.text.trim();
+          }
+        }
+        return '';
+      }
+
+      function autoResizeTextarea(el) {
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = Math.min(240, el.scrollHeight + 2) + 'px';
+      }
+
+      function debounce(fn, wait) {
+        var timer = 0;
+        return function(){
+          var args = arguments;
+          clearTimeout(timer);
+          timer = setTimeout(function(){ fn.apply(null, args); }, wait);
+        };
+      }
+
+      function loadFromStorage(key) {
+        try {
+          return localStorage.getItem(key);
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function saveToStorage(key, value) {
+        try {
+          if (value === null || value === undefined || value === '') {
+            localStorage.removeItem(key);
+          } else {
+            localStorage.setItem(key, value);
+          }
+        } catch (_) {}
+      }
+
+      return {
+        init: init
+      };
     })();
+
+    CDV_CHAT.init();
   } catch (e) {
     console && console.warn && console.warn('CDV inject error', e);
   }

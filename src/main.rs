@@ -1,5 +1,6 @@
 mod assets;
 mod cli;
+mod config;
 mod enhance;
 mod injector;
 mod overview;

@@ -24,6 +24,8 @@ A tool that enhances Rust documentation browsing experience by injecting interac
 - **页面相关问答** - 基于当前文档内容的智能问答
 - **文本检索** - 自动从当前页面提取相关内容
 - **简洁界面** - 类似 LLM 的聊天界面
+- **上下文分层提示** - 自动拼装系统提示、环境信息、页面摘要、选区与历史消息
+- **YAML 配置** - 首次运行生成 `~/.cargo-doc-viewer/config.yaml` 模板，可自定义模型、提示词与上下文策略
 
 ### 🎨 用户体验改进 UX Improvements
 - **专注模式** - 隐藏干扰元素，专注阅读文档
@@ -220,3 +222,12 @@ This project is licensed under either of:
 **如果这个工具对你有帮助，请给个 ⭐️ 支持一下！**
 
 **If this tool helps you, please give it a ⭐️!**
+### AI Chat 配置 AI Chat Configuration
+- 首次打开聊天面板时，会在 `~/.cargo-doc-viewer/config.yaml`（或手动指定的 `CDV_CONFIG_PATH`）创建配置模板。
+- 通过 YAML 配置可自定义：
+  - `api`：兼容 OpenAI 的接口地址、模型名称、默认请求头与超时时间；
+  - `prompts`：系统提示词、环境模板、备选响应语言；
+  - `context`：选区去抖时间、页面摘要 Token 预算、历史轮次窗口与敏感信息清洗规则；
+  - `ui`：默认语言、是否自动展开上下文预览、是否允许编辑系统提示。
+- 配置值支持 `$VAR` / `${VAR}` 引用环境变量；解析顺序为进程环境 → 配置同目录 `.env` → 当前工作目录 `.env` → `$HOME/.env`，便于安全加载 API Key 与自定义 API 基址。
+- 前端会自动将 `localStorage` 中的 API Key 与模型覆写应用于请求，并在“Context”面板中展示上下文层级、Token 估算及复制上下文的快捷操作。

@@ -31,6 +31,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `main.rs` – CLI entrypoint; dispatches to serve/enhance/revert modes
 - `cli.rs` – manual argument parsing and defaulting logic
 - `assets.rs` – embeds `src/assets/cdv.css` and `src/assets/cdv.js`
+- `config.rs` – loads/serialises YAML chat config (`~/.cargo-doc-viewer/config.yaml`)
 - `injector.rs` – pure functions for injecting/removing assets from HTML
 - `overview.rs` – scans doc directories and renders the crate overview page
 - `enhance.rs` – filesystem walker used by enhance/revert flows
@@ -54,7 +55,7 @@ The JS bundle (`src/assets/cdv.js`) still powers:
 1. Top navigation bar + rustdoc search integration
 2. Search filters and quick-search palette
 3. Symbols list and breadcrumbs UI
-4. Chat panel shell with local heuristics
+4. Chat panel with layered context builder (system/env/page/selection/history)
 5. Focus mode, copy buttons, anchor highlighting, etc.
 
 ## Extending the Tool
@@ -71,10 +72,11 @@ The JS bundle (`src/assets/cdv.js`) still powers:
 - Document any new UX behavior in `README.md` and here
 
 ### Chat Integration
-To replace the placeholder chat behavior:
-1. Extend the JS bundle with real API calls
-2. Expose configuration in Rust (e.g., via query params or injected data attributes)
-3. Handle offline mode gracefully – the binary should still operate without network access
+- Configuration lives in YAML (`CDV_CONFIG_PATH` env override, default `~/.cargo-doc-viewer/config.yaml`) and is embedded at runtime via `<script id="cdv-bootstrap">`.
+- `src/assets/cdv.js` assembles the request context层次: system prompt → environment template → page summary → pinned selection → bounded history → user prompt. The same structure drives both the API payload and the context preview panel.
+- The chat panel supports localStorage overrides (API key, model, custom system prompt) and debounced selection tracking; keep debounce defaults in sync with `config.rs`.
+- YAML values may reference environment variables via `$VAR` / `${VAR}`; `config.rs` resolves them using the current process env, `.env` beside the config, `.env` in the CWD, then `$HOME/.env`, so secrets can stay outside version control.
+- When extending the chat feature, update both the Rust config schema and the front-end normalisation helpers to keep defaults aligned, and document new knobs in `README.md`.
 
 ## Testing Changes
 1. Run `cargo check` after Rust edits

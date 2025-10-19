@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::assets::{CDV_CSS, CDV_JS};
+use crate::config;
 
 pub fn inject(content: &str) -> Option<String> {
     if content.contains("<!-- CDV: injected -->") {
@@ -20,7 +21,11 @@ pub fn inject(content: &str) -> Option<String> {
     }
 
     if let Some(idx) = modified.rfind("</body>") {
-        let body_inject = format!("<script id=\"cdv-script\">\n{}\n</script>\n", CDV_JS);
+        let body_inject = format!(
+            "<script id=\"cdv-bootstrap\">\n{}\n</script>\n<script id=\"cdv-script\">\n{}\n</script>\n",
+            config::bootstrap_assignment(),
+            CDV_JS
+        );
         let mut buffer = String::with_capacity(modified.len() + body_inject.len());
         buffer.push_str(&modified[..idx]);
         buffer.push_str(&body_inject);
@@ -51,6 +56,18 @@ pub fn revert(content: &str) -> Option<String> {
     }
 
     if let Some(start) = modified.find("<script id=\"cdv-script\">") {
+        if let Some(end_rel) = modified[start..].find("</script>") {
+            let end = start + end_rel + "</script>".len();
+            let end_with_newline = if modified.as_bytes().get(end).copied() == Some(b'\n') {
+                end + 1
+            } else {
+                end
+            };
+            modified.replace_range(start..end_with_newline, "");
+        }
+    }
+
+    if let Some(start) = modified.find("<script id=\"cdv-bootstrap\">") {
         if let Some(end_rel) = modified[start..].find("</script>") {
             let end = start + end_rel + "</script>".len();
             let end_with_newline = if modified.as_bytes().get(end).copied() == Some(b'\n') {
@@ -94,6 +111,7 @@ mod tests {
         let first = inject(original).expect("first injection should modify");
         assert!(first.contains("<!-- CDV: injected -->"));
         assert!(first.contains("id=\"cdv-style\""));
+        assert!(first.contains("id=\"cdv-bootstrap\""));
         assert!(first.contains("id=\"cdv-script\""));
 
         assert!(
